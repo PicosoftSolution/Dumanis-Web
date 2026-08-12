@@ -1,0 +1,18 @@
+# Without this, refreshing or directly opening a URL like
+# /dashboard/super-admin/reports or /dashboard/super-admin/entries
+# returns a real server-level "404 Not Found" because Apache looks for
+# a physical file at that path. This tells Apache to always serve
+# index.html and let React Router handle the routing in the browser.
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # If the request is for a real file or directory, serve it directly
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Otherwise, fall back to index.html so the SPA router can take over
+  RewriteRule ^ index.html [L]
+</IfModule>
