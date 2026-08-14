@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   Shield, 
@@ -44,13 +45,13 @@ export default function Sidebar({ active, onChange, user, onLogout }) {
 
       {/* Entry — quick access to fill a survey, same right every role has */}
       <div className="px-4 pt-4">
-        <a
-          href="/entry"
+        <Link
+          to="/entry"
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all duration-200 border border-white/20"
         >
           <PenSquare className="w-5 h-5" />
           <span className="text-sm font-semibold">New Entry</span>
-        </a>
+        </Link>
       </div>
 
 

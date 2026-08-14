@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import {
   LayoutDashboard,
   FileText,
@@ -8,9 +9,6 @@ import {
   PenSquare,
 } from 'lucide-react';
 
-// Intentionally minimal — a Team Member only has "Entry" and "review his own
-// records per day/week" per the permissions matrix. No projects, no team
-// management, no templates, no overall reports.
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { key: 'entries', label: 'My Entries', icon: FileText },
@@ -19,7 +17,6 @@ const NAV_ITEMS = [
 export default function Sidebar({ active, onChange, user, onLogout }) {
   return (
     <div className="w-64 bg-gradient-to-b from-indigo-900 to-indigo-800 min-h-screen sticky top-0 flex flex-col shadow-xl">
-      {/* Logo Section — same styling as the Admin & Super Admin portals */}
       <div className="p-6 border-b border-indigo-700/50">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-white/10 backdrop-blur rounded-xl flex items-center justify-center shadow-lg">
@@ -34,13 +31,13 @@ export default function Sidebar({ active, onChange, user, onLogout }) {
 
       {/* Entry — quick access to fill a survey */}
       <div className="px-4 pt-4">
-        <a
-          href="/entry"
+        <Link
+          to="/entry"
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all duration-200 border border-white/20"
         >
           <PenSquare className="w-5 h-5" />
           <span className="text-sm font-semibold">New Entry</span>
-        </a>
+        </Link>
       </div>
 
       {/* Navigation */}
@@ -70,7 +67,6 @@ export default function Sidebar({ active, onChange, user, onLogout }) {
         })}
       </nav>
 
-      {/* User Profile Section */}
       <div className="p-4 border-t border-white/10 mt-auto">
         <div className="flex items-center gap-3 mb-4 p-2 rounded-xl bg-white/5">
           <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-md">
