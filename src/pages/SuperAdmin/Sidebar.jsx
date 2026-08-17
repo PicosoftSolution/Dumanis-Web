@@ -1,5 +1,4 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   Shield, 
@@ -14,6 +13,7 @@ import {
   PenSquare,
   Layers
 } from 'lucide-react';
+import logo from '../../assets/logo.jpg';
 
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -33,8 +33,8 @@ export default function Sidebar({ active, onChange, user, onLogout }) {
       {/* Logo Section */}
       <div className="p-6 border-b border-blue-700/50">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-white/10 backdrop-blur rounded-xl flex items-center justify-center shadow-lg">
-            <Crown className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-lg p-1.5">
+            <img src={logo} alt="DUNAMIS logo" className="w-full h-full object-contain" />
           </div>
           <div>
             <h1 className="text-white font-bold text-lg tracking-tight">DUNAMIS</h1>
@@ -45,13 +45,13 @@ export default function Sidebar({ active, onChange, user, onLogout }) {
 
       {/* Entry — quick access to fill a survey, same right every role has */}
       <div className="px-4 pt-4">
-        <Link
-          to="/entry"
+        <a
+          href="/entry"
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all duration-200 border border-white/20"
         >
           <PenSquare className="w-5 h-5" />
           <span className="text-sm font-semibold">New Entry</span>
-        </Link>
+        </a>
       </div>
 
 
