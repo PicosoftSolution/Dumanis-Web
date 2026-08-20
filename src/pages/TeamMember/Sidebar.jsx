@@ -2,29 +2,17 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import {
   LayoutDashboard,
-  FolderKanban,
-  Users,
   FileText,
-  BarChart3,
   LogOut,
   ShieldCheck,
   ChevronRight,
-  FormInput,
   PenSquare,
-  Layers
 } from 'lucide-react';
 import logo from '../../assets/logo.jpg';
 
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { key: 'projects', label: 'My Projects', icon: FolderKanban },
-  { key: 'templates', label: 'Templates', icon: Layers },
-  { key: 'forms', label: 'Forms & Questions', icon: FormInput },
-  { key: 'dynamic-forms', label: 'Survey Forms (Builder)', icon: FormInput },
-  { key: 'form-responses', label: 'Form Responses', icon: FileText },
-  { key: 'team', label: 'Team Members', icon: Users },
-  { key: 'entries', label: 'All Entries', icon: FileText },
-  { key: 'reports', label: 'Reports', icon: BarChart3 },
+  { key: 'entries', label: 'My Entries', icon: FileText },
 ];
 
 export default function Sidebar({ active, onChange, user, onLogout }) {
@@ -38,12 +26,12 @@ export default function Sidebar({ active, onChange, user, onLogout }) {
           </div>
           <div>
             <h1 className="text-white font-bold text-lg tracking-tight">DUNAMIS</h1>
-            <p className="text-indigo-200 text-xs">GeoSurvey Platform · Admin</p>
+            <p className="text-indigo-200 text-xs">GeoSurvey Platform · Team Member</p>
           </div>
         </div>
       </div>
 
-      {/* Entry — quick access to fill a survey for an assigned project */}
+      {/* Entry — quick access to fill a survey */}
       <div className="px-4 pt-4">
         <Link
           to="/entry"
@@ -81,7 +69,6 @@ export default function Sidebar({ active, onChange, user, onLogout }) {
         })}
       </nav>
 
-      {/* User Profile Section */}
       <div className="p-4 border-t border-white/10 mt-auto">
         <div className="flex items-center gap-3 mb-4 p-2 rounded-xl bg-white/5">
           <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-md">
@@ -93,7 +80,7 @@ export default function Sidebar({ active, onChange, user, onLogout }) {
             <p className="text-white text-sm font-medium truncate">
               {user?.firstName} {user?.lastName}
             </p>
-            <p className="text-indigo-200 text-xs">Administrator</p>
+            <p className="text-indigo-200 text-xs">Team Member</p>
           </div>
         </div>
         <button
