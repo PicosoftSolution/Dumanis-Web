@@ -253,6 +253,13 @@ function useGPS() {
   return { location, gpsStatus, fetchGPS };
 }
 
+// Turn a queueSubmission() failure into a message the user can actually act on.
+function offlineSaveErrorMessage(err) {
+  return err?.message === 'STORAGE_FULL'
+    ? "Couldn't save offline — this device's storage is full. Free up space (e.g. clear old synced entries) and try again."
+    : "Couldn't save this entry offline. Please try again.";
+}
+
 // ── Main SurveyForm ───────────────────────────────────────────
 export default function SurveyForm({ projectId, formType, onSuccess, onOffline }) {
   const [form, setForm] = useState(null);   // rendered form from API
@@ -270,7 +277,9 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
     setLoadError(false);
 
     // If the browser reports offline, skip the network attempt entirely
-    // and go straight to the cached copy of this exact form.
+    // and go straight to the cached copy of this exact form. Thanks to
+    // EntryPage's preloadAllForms(), this cache exists even if the user
+    // has never opened this specific project/form combination before.
     if (!navigator.onLine) {
       const cached = getCachedForm(projectId, formType);
       if (cached) setForm(cached);
@@ -352,10 +361,18 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
     // failure, which is confusing. If the browser reports itself offline,
     // don't even try the network — queue immediately.
     if (!navigator.onLine) {
-      queueSubmission(payload);
-      setSavedOffline(true);
-      onOffline && onOffline();
-      setSubmitting(false);
+      try {
+        queueSubmission(payload);
+        setSavedOffline(true);
+        onOffline && onOffline();
+      } catch (err) {
+        // queueSubmission throws if it couldn't actually persist the entry
+        // (e.g. localStorage quota exceeded by earlier photo-heavy entries).
+        // Surface this instead of leaving the button stuck on "Submitting...".
+        setErrors({ _form: offlineSaveErrorMessage(err) });
+      } finally {
+        setSubmitting(false);
+      }
       return;
     }
 
@@ -382,9 +399,13 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
         'success' in error.response.data;
 
       if (!navigator.onLine || !isRealApiError) {
-        queueSubmission(payload);
-        setSavedOffline(true);
-        onOffline && onOffline();
+        try {
+          queueSubmission(payload);
+          setSavedOffline(true);
+          onOffline && onOffline();
+        } catch (queueErr) {
+          setErrors({ _form: offlineSaveErrorMessage(queueErr) });
+        }
       } else {
         setErrors({ _form: error.response.data.message || 'Submission failed. Please try again.' });
       }
@@ -398,7 +419,7 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
     return (
       <div style={{ padding: 24, color: "#e53935" }}>
         {!navigator.onLine
-          ? "You're offline and this form hasn't been opened on this device before, so there's no local copy to load. Open it once while online, and it'll be available offline after that."
+          ? "You're offline and this form hasn't been cached on this device yet. Open the app once while online, and it'll be available offline after that."
           : "Couldn't load the form. Please try again."}
       </div>
     );

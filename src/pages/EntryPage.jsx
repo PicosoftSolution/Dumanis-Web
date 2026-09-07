@@ -3,7 +3,13 @@ import { Folder, MapPin, ChevronLeft, ClipboardList, WifiOff, RefreshCw } from '
 import api from '../api/axios';
 import toast from 'react-hot-toast';
 import SurveyForm from './SuperAdmin/SurveyForm';
-import { getPendingSubmissions, syncPendingSubmissions, cacheProjects, getCachedProjects } from '../utils/offlineSync';
+import {
+  getPendingSubmissions,
+  syncPendingSubmissions,
+  cacheProjects,
+  getCachedProjects,
+  preloadAllForms,
+} from '../utils/offlineSync';
 
 const FORM_TYPES = ['Residential', 'Commercial', 'Industrial', 'Institutional', 'Open Site', 'Apartment'];
 
@@ -69,6 +75,13 @@ export default function EntryPage() {
         const active = (res.data.data || []).filter((p) => p.isActive);
         setProjects(active);
         cacheProjects(active); // keep a local copy for the next time we're offline
+
+        // Quietly fetch + cache EVERY project's EVERY enabled form type in
+        // the background, so any project/form combination the user picks
+        // later — even one they've never opened before — already works
+        // offline. No loading state; failures for individual forms are
+        // skipped and retried on the next successful online load.
+        preloadAllForms(api, active, FORM_TYPES);
       })
       .catch((err) => {
         // No response at all -> we're offline; fall back to whatever was
