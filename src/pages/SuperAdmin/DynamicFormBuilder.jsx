@@ -34,7 +34,7 @@ const DragHandle = () => (
 );
 
 // ── QuestionRow: single draggable question in builder ─────────
-function QuestionRow({ fq, index, onToggleVisible, onToggleMandatory, onMoveUp, onMoveDown, onRemove }) {
+function QuestionRow({ fq, index, onToggleVisible, onToggleMandatory, onMoveUp, onMoveDown, onRemove, onEdit }) {
   const q = fq.question;
   return (
     <div
@@ -72,12 +72,24 @@ function QuestionRow({ fq, index, onToggleVisible, onToggleMandatory, onMoveUp, 
 
       <button onClick={() => onMoveUp(index)} disabled={index === 0} style={btnSm}>▲</button>
       <button onClick={() => onMoveDown(index)} style={btnSm}>▼</button>
-      <button onClick={() => onRemove(index)} style={{ ...btnSm, color: "#e53935" }}>✕</button>
+      <button onClick={() => onEdit(q)} style={{ ...btnSm, color: "#1a73e8" }} title="Edit this question">✎</button>
+      <button onClick={() => onRemove(index)} style={{ ...btnSm, color: "#e53935" }} title="Remove from this form">✕</button>
     </div>
   );
 }
 
 const btnSm = { padding: "2px 8px", border: "1px solid #ddd", borderRadius: 4, cursor: "pointer", background: "#fff" };
+
+const QUESTION_TYPES = ["text", "number", "email", "phone", "radio", "checkbox", "textarea", "ratio", ];
+const needsOptionsFor = (type) => ["select", "radio", "checkbox"].includes(type);
+
+// Turn a question's saved options ([{label, value}]) back into the
+// comma-separated text the editor input expects.
+const optionsToText = (options) => (options || []).map((o) => o.label ?? o.value ?? "").join(", ");
+
+// Turn the comma-separated editor text back into [{label, value}] options.
+const textToOptions = (text) =>
+  text.split(",").map((s) => s.trim()).filter(Boolean).map((v) => ({ label: v, value: v }));
 
 // ── Main DynamicFormBuilder ───────────────────────────────────
 export default function DynamicFormBuilder() {
@@ -94,9 +106,13 @@ export default function DynamicFormBuilder() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const [showAddQuestion, setShowAddQuestion] = useState(false);
-  const QUESTION_TYPES = ["text", "number", "email", "phone", "date", "select", "radio", "checkbox", "textarea", "percentage", "ratio", "image"];
   const [newQ, setNewQ] = useState({ label: "", name: "", type: "text", optionsText: "", isMandatory: false });
   const [addingQ, setAddingQ] = useState(false);
+
+  // ── Edit-in-place state for an existing question in the bank ──
+  const [editingQId, setEditingQId] = useState(null);
+  const [editQ, setEditQ] = useState({ label: "", type: "text", optionsText: "", isMandatory: false });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
     api.get("/api/projects").then((r) => r.success && setProjects(r.data));
@@ -194,10 +210,8 @@ export default function DynamicFormBuilder() {
       name = `${baseName}_${suffix}`;
       suffix++;
     }
-    const needsOptions = ["select", "radio", "checkbox"].includes(newQ.type);
-    const options = needsOptions
-      ? newQ.optionsText.split(",").map((s) => s.trim()).filter(Boolean).map((v) => ({ label: v, value: v }))
-      : [];
+    const needsOptions = needsOptionsFor(newQ.type);
+    const options = needsOptions ? textToOptions(newQ.optionsText) : [];
     if (needsOptions && options.length === 0) {
       return setMsg({ type: "error", text: "Add at least one option (comma separated)" });
     }
@@ -221,6 +235,67 @@ export default function DynamicFormBuilder() {
       setMsg({ type: "success", text: "Question created and added to the form" });
     } else {
       setMsg({ type: "error", text: res.message || "Failed to create question" });
+    }
+  };
+
+  // ── Edit an existing question in the bank ──────────────────
+  const startEdit = (q) => {
+    setShowAddQuestion(false);
+    setEditingQId(q._id);
+    setEditQ({
+      label: q.label,
+      type: q.type,
+      optionsText: optionsToText(q.options),
+      isMandatory: !!q.isMandatory,
+    });
+  };
+
+  const cancelEdit = () => setEditingQId(null);
+
+  const saveEdit = async () => {
+    if (!editQ.label.trim()) return setMsg({ type: "error", text: "Question label is required" });
+    const needsOptions = needsOptionsFor(editQ.type);
+    const options = needsOptions ? textToOptions(editQ.optionsText) : [];
+    if (needsOptions && options.length === 0) {
+      return setMsg({ type: "error", text: "Add at least one option (comma separated)" });
+    }
+
+    setSavingEdit(true);
+    const res = await api.patch(`/api/questions/${editingQId}`, {
+      label: editQ.label,
+      type: editQ.type,
+      isMandatory: editQ.isMandatory,
+      options,
+    });
+    setSavingEdit(false);
+
+    if (res.success) {
+      // Keep the question bank AND any form that already uses this
+      // question in sync, so the type/options change shows up everywhere
+      // immediately without needing a page refresh.
+      setAllQuestions((prev) => prev.map((q) => (q._id === editingQId ? res.data : q)));
+      setFormQuestions((prev) =>
+        prev.map((fq) => (fq.question._id === editingQId ? { ...fq, question: res.data } : fq))
+      );
+      setEditingQId(null);
+      setMsg({ type: "success", text: "Question updated" });
+    } else {
+      setMsg({ type: "error", text: res.message || "Failed to update question" });
+    }
+  };
+
+  // ── Delete a question from the bank entirely ───────────────
+  const deleteQuestion = async (q) => {
+    const ok = window.confirm(`Delete "${q.label}" from the question bank? This removes it from every form using it.`);
+    if (!ok) return;
+    const res = await api.delete(`/api/questions/${q._id}`);
+    if (res.success) {
+      setAllQuestions((prev) => prev.filter((x) => x._id !== q._id));
+      setFormQuestions((prev) => prev.filter((fq) => fq.question._id !== q._id));
+      if (editingQId === q._id) setEditingQId(null);
+      setMsg({ type: "success", text: "Question deleted" });
+    } else {
+      setMsg({ type: "error", text: res.message || "Failed to delete question" });
     }
   };
 
@@ -322,6 +397,7 @@ export default function DynamicFormBuilder() {
                   onMoveUp={moveUp}
                   onMoveDown={moveDown}
                   onRemove={removeQuestion}
+                  onEdit={startEdit}
                 />
               ))}
             </div>
@@ -331,7 +407,7 @@ export default function DynamicFormBuilder() {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                 <h4 style={{ margin: 0 }}>Available Questions ({availableQuestions.length})</h4>
                 <button
-                  onClick={() => setShowAddQuestion((v) => !v)}
+                  onClick={() => { setShowAddQuestion((v) => !v); setEditingQId(null); }}
                   style={{ padding: "4px 10px", background: showAddQuestion ? "#eee" : "#1a73e8", color: showAddQuestion ? "#333" : "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}
                 >
                   {showAddQuestion ? "Cancel" : "+ New Question"}
@@ -363,7 +439,7 @@ export default function DynamicFormBuilder() {
                       Required
                     </label>
                   </div>
-                  {["select", "radio", "checkbox"].includes(newQ.type) && (
+                  {needsOptionsFor(newQ.type) && (
                     <input
                       placeholder="Options, comma separated (e.g. Yes, No, Maybe)"
                       value={newQ.optionsText}
@@ -380,6 +456,64 @@ export default function DynamicFormBuilder() {
                   </button>
                   <p style={{ fontSize: 11, color: "#888", marginTop: 6, marginBottom: 0 }}>
                     This question will be saved to the "{selectedFormType}" question bank and added to this form immediately.
+                  </p>
+                </div>
+              )}
+
+              {/* Edit-in-place panel for an existing question */}
+              {editingQId && (
+                <div style={{ border: "1px solid #ffe0b2", background: "#fff8ec", borderRadius: 8, padding: 12, marginBottom: 14 }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "#a15c00", marginTop: 0, marginBottom: 8 }}>
+                    Editing question
+                  </p>
+                  <input
+                    placeholder="Question label"
+                    value={editQ.label}
+                    onChange={(e) => setEditQ((s) => ({ ...s, label: e.target.value }))}
+                    style={{ ...inputStyle, width: "100%", marginBottom: 8, boxSizing: "border-box" }}
+                  />
+                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                    <select
+                      value={editQ.type}
+                      onChange={(e) => setEditQ((s) => ({ ...s, type: e.target.value }))}
+                      style={{ ...inputStyle, minWidth: 130 }}
+                    >
+                      {QUESTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        checked={editQ.isMandatory}
+                        onChange={(e) => setEditQ((s) => ({ ...s, isMandatory: e.target.checked }))}
+                      />
+                      Required
+                    </label>
+                  </div>
+                  {needsOptionsFor(editQ.type) && (
+                    <input
+                      placeholder="Options, comma separated (e.g. Yes, No, Maybe)"
+                      value={editQ.optionsText}
+                      onChange={(e) => setEditQ((s) => ({ ...s, optionsText: e.target.value }))}
+                      style={{ ...inputStyle, width: "100%", marginBottom: 8, boxSizing: "border-box" }}
+                    />
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={saveEdit}
+                      disabled={savingEdit}
+                      style={{ padding: "6px 16px", background: "#1a73e8", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}
+                    >
+                      {savingEdit ? "Saving…" : "Save Changes"}
+                    </button>
+                    <button
+                      onClick={cancelEdit}
+                      style={{ padding: "6px 16px", background: "#fff", color: "#333", border: "1px solid #ddd", borderRadius: 4, cursor: "pointer" }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <p style={{ fontSize: 11, color: "#a15c00", marginTop: 6, marginBottom: 0 }}>
+                    Changing the type/options updates this question everywhere it's used, including in this form if already added.
                   </p>
                 </div>
               )}
@@ -402,12 +536,28 @@ export default function DynamicFormBuilder() {
                     <div style={{ fontWeight: 500 }}>{q.label}</div>
                     <div style={{ fontSize: 11, color: "#888" }}>{q.type} • {q.formType}</div>
                   </div>
-                  <button
-                    onClick={() => addQuestion(q)}
-                    style={{ padding: "3px 10px", background: "#1a73e8", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}
-                  >
-                    + Add
-                  </button>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
+                      onClick={() => addQuestion(q)}
+                      style={{ padding: "3px 10px", background: "#1a73e8", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}
+                    >
+                      + Add
+                    </button>
+                    <button
+                      onClick={() => startEdit(q)}
+                      style={{ padding: "3px 10px", background: "#fff", color: "#1a73e8", border: "1px solid #1a73e8", borderRadius: 4, cursor: "pointer" }}
+                      title="Edit this question"
+                    >
+                      ✎
+                    </button>
+                    <button
+                      onClick={() => deleteQuestion(q)}
+                      style={{ padding: "3px 10px", background: "#fff", color: "#e53935", border: "1px solid #e53935", borderRadius: 4, cursor: "pointer" }}
+                      title="Delete from question bank"
+                    >
+                      🗑
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

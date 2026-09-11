@@ -89,33 +89,46 @@ export default function Reports() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
+      <div className="flex items-center justify-center h-96 px-4">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading reports...</p>
+          <p className="mt-4 text-gray-600 text-sm sm:text-base">Loading reports...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6">
+    // Padding shrinks on small screens, overflow-x-hidden stops accidental page-level horizontal scroll
+    <div className="p-4 sm:p-6 max-w-full overflow-x-hidden">
       <div className="mb-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">Reports & Analytics</h1>
-            <p className="text-gray-500 mt-1">Comprehensive platform insights</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Reports & Analytics</h1>
+            <p className="text-gray-500 mt-1 text-sm sm:text-base">Comprehensive platform insights</p>
           </div>
-          <div className="flex gap-2">
-            <div className="flex items-center gap-2 bg-white rounded-lg border border-gray-200 px-3 py-1.5">
-              <Calendar className="w-4 h-4 text-gray-400" />
-              <input type="date" value={dateRange.start} onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
-                className="text-sm focus:outline-none" />
-              <span className="text-gray-400">to</span>
-              <input type="date" value={dateRange.end} onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
-                className="text-sm focus:outline-none" />
+          {/* Filters stack full-width on mobile; date fields wrap instead of overflowing */}
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <div className="flex flex-wrap items-center gap-2 bg-white rounded-lg border border-gray-200 px-3 py-2 sm:py-1.5 w-full sm:w-auto">
+              <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
+              <input
+                type="date"
+                value={dateRange.start}
+                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+                className="text-sm focus:outline-none min-w-0 flex-1"
+              />
+              <span className="text-gray-400 text-sm shrink-0">to</span>
+              <input
+                type="date"
+                value={dateRange.end}
+                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+                className="text-sm focus:outline-none min-w-0 flex-1"
+              />
             </div>
-            <button onClick={exportReport} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+            <button
+              onClick={exportReport}
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors w-full sm:w-auto"
+            >
               <Download className="w-4 h-4" />
               <span>Export</span>
             </button>
@@ -123,18 +136,18 @@ export default function Reports() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6 mb-6 md:mb-8">
         {statsCards.map((card, idx) => {
           const Icon = card.icon;
           return (
-            <div key={idx} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className={`p-3 bg-${card.color}-100 rounded-lg`}>
-                  <Icon className={`w-6 h-6 text-${card.color}-600`} />
+            <div key={idx} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 sm:p-6 min-w-0">
+              <div className="flex items-center justify-between mb-3 sm:mb-4 gap-2">
+                <div className={`p-2.5 sm:p-3 bg-${card.color}-100 rounded-lg shrink-0`}>
+                  <Icon className={`w-5 h-5 sm:w-6 sm:h-6 text-${card.color}-600`} />
                 </div>
-                <span className="text-2xl font-bold text-gray-800">{card.value}</span>
+                <span className="text-xl sm:text-2xl font-bold text-gray-800 truncate">{card.value}</span>
               </div>
-              <p className="text-gray-600 text-sm">{card.label}</p>
+              <p className="text-gray-600 text-xs sm:text-sm">{card.label}</p>
               {card.active !== undefined && (
                 <p className="text-xs text-gray-400 mt-1">{card.active} active</p>
               )}
@@ -143,15 +156,15 @@ export default function Reports() {
         })}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">User Role Distribution</h3>
-          <div className="space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-6 md:mb-8">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 sm:p-6 min-w-0">
+          <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-4">User Role Distribution</h3>
+          <div className="space-y-3 sm:space-y-4">
             {roleDistribution.map((role) => (
               <div key={role.role}>
-                <div className="flex justify-between mb-2">
-                  <span className="text-sm text-gray-600">{role.role}</span>
-                  <span className="text-sm font-semibold text-gray-900">{role.count}</span>
+                <div className="flex justify-between mb-2 gap-2">
+                  <span className="text-xs sm:text-sm text-gray-600 truncate">{role.role}</span>
+                  <span className="text-xs sm:text-sm font-semibold text-gray-900 shrink-0">{role.count}</span>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-2">
                   <div className={`h-2 rounded-full bg-${role.color}-500`}
@@ -162,15 +175,15 @@ export default function Reports() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Form Submissions Distribution</h3>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 sm:p-6 min-w-0">
+          <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-4">Form Submissions Distribution</h3>
           {stats?.byForm?.length > 0 ? (
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               {stats.byForm.slice(0, 5).map((form) => (
                 <div key={form._id}>
-                  <div className="flex justify-between mb-2">
-                    <span className="text-sm text-gray-600">{form._id}</span>
-                    <span className="text-sm font-semibold text-gray-900">{form.count}</span>
+                  <div className="flex justify-between mb-2 gap-2">
+                    <span className="text-xs sm:text-sm text-gray-600 truncate">{form._id}</span>
+                    <span className="text-xs sm:text-sm font-semibold text-gray-900 shrink-0">{form.count}</span>
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-2">
                     <div className="h-2 rounded-full bg-blue-500"
@@ -180,28 +193,64 @@ export default function Reports() {
               ))}
             </div>
           ) : (
-            <p className="text-gray-500 text-center py-8">No submissions yet</p>
+            <p className="text-gray-500 text-center py-8 text-sm">No submissions yet</p>
           )}
         </div>
       </div>
 
+      {/* Projects Summary — table on sm+ screens, stacked cards on mobile */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100">
-          <h3 className="text-lg font-semibold text-gray-800">Projects Summary</h3>
+        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-100">
+          <h3 className="text-base sm:text-lg font-semibold text-gray-800">Projects Summary</h3>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
+
+        {/* Mobile card list */}
+        <div className="sm:hidden divide-y divide-gray-100">
+          {projects?.slice(0, 10).map((project) => {
+            const submissionCount = submissions?.filter(
+              (s) => (s.project?._id || s.project) === project._id
+            ).length || 0;
+            return (
+              <div key={project._id} className="p-4 flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-gray-900 truncate">{project.name}</span>
+                  <span className={`px-2 py-1 text-[10px] rounded-full font-medium shrink-0 ${project.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    {project.isActive ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {project.enabledForms?.slice(0, 2).map((form) => (
+                    <span key={form} className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded">{form}</span>
+                  ))}
+                  {project.enabledForms?.length > 2 && (
+                    <span className="text-xs text-gray-500">+{project.enabledForms.length - 2}</span>
+                  )}
+                </div>
+                <span className="text-xs text-gray-500">{submissionCount} submissions</span>
+              </div>
+            );
+          })}
+          {(!projects || projects.length === 0) && (
+            <div className="px-4 py-12 text-center text-gray-500 text-sm">No projects found</div>
+          )}
+        </div>
+
+        {/* Table for sm and up */}
+        <div className="hidden sm:block overflow-x-auto">
+          <table className="w-full min-w-[560px]">
             <thead className="bg-gray-50">
-              <tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project Name</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Forms Enabled</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Submissions</th>
-              </tr></thead>
+              <tr>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Project Name</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Forms Enabled</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Status</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Submissions</th>
+              </tr>
+            </thead>
             <tbody className="divide-y divide-gray-100">
               {projects?.slice(0, 10).map((project) => (
                 <tr key={project._id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">{project.name}</td>
-                  <td className="px-6 py-4">
+                  <td className="px-4 md:px-6 py-4 text-sm font-medium text-gray-900 max-w-[200px] truncate">{project.name}</td>
+                  <td className="px-4 md:px-6 py-4">
                     <div className="flex flex-wrap gap-1">
                       {project.enabledForms?.slice(0, 2).map(form => (
                         <span key={form} className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded">{form}</span>
@@ -211,16 +260,23 @@ export default function Reports() {
                       )}
                     </div>
                   </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs rounded-full font-medium ${project.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  <td className="px-4 md:px-6 py-4">
+                    <span className={`px-2 py-1 text-xs rounded-full font-medium whitespace-nowrap ${project.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                       {project.isActive ? 'Active' : 'Inactive'}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
+                  <td className="px-4 md:px-6 py-4 text-sm text-gray-600 whitespace-nowrap">
                     {submissions?.filter(s => (s.project?._id || s.project) === project._id).length || 0}
                   </td>
                 </tr>
               ))}
+              {(!projects || projects.length === 0) && (
+                <tr>
+                  <td colSpan="4" className="px-6 py-12 text-center text-gray-500">
+                    No projects found
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

@@ -19,7 +19,6 @@ const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { key: 'projects', label: 'My Projects', icon: FolderKanban },
   { key: 'templates', label: 'Templates', icon: Layers },
-  { key: 'forms', label: 'Forms & Questions', icon: FormInput },
   { key: 'dynamic-forms', label: 'Survey Forms (Builder)', icon: FormInput },
   { key: 'form-responses', label: 'Form Responses', icon: FileText },
   { key: 'team', label: 'Team Members', icon: Users },

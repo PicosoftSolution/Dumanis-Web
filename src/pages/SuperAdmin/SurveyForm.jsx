@@ -30,11 +30,28 @@ export const optLabel = (opt) => {
   return reconstruct(opt);
 };
 
+// The Question bank (DynamicFormBuilder) saves types as "select" / "radio" /
+// "checkbox" / "email" / "phone" / "textarea". Some older records (or forms
+// built before that naming) may still use "dropdown" / "single_choice" /
+// "multi_choice". Normalize both spellings to one canonical set here so
+// adding a question in the builder is guaranteed to render the matching
+// field here — this is what was causing radio/checkbox to fall through to
+// a plain text box.
+const TYPE_ALIASES = {
+  select: "dropdown",
+  dropdown: "dropdown",
+  radio: "single_choice",
+  single_choice: "single_choice",
+  checkbox: "multi_choice",
+  multi_choice: "multi_choice",
+};
+
 // ── Field renderer ────────────────────────────────────────────
 // Exported so other screens (e.g. the "edit my entry" modal) can render the
 // exact same question types without duplicating this logic.
 export function FormField({ question, value, onChange, error }) {
   const { label, fieldName, type, options, isMandatory } = question;
+  const resolvedType = TYPE_ALIASES[type] || type;
 
   const inputBase = {
     width: "100%",
@@ -46,20 +63,39 @@ export function FormField({ question, value, onChange, error }) {
   };
 
   let field;
-  switch (type) {
+  switch (resolvedType) {
     case "text":
     case "number":
+    case "email":
+    case "phone":
     case "mobile":
     case "aadhaar":
     case "date":
       field = (
         <input
-          type={type === "date" ? "date" : type === "number" ? "number" : "text"}
+          type={
+            resolvedType === "date" ? "date"
+            : resolvedType === "number" ? "number"
+            : resolvedType === "email" ? "email"
+            : resolvedType === "phone" || resolvedType === "mobile" ? "tel"
+            : "text"
+          }
           value={value || ""}
           onChange={(e) => onChange(fieldName, e.target.value)}
           placeholder={`Enter ${label}`}
           style={inputBase}
-          inputMode={type === "mobile" || type === "aadhaar" ? "numeric" : undefined}
+          inputMode={["phone", "mobile", "aadhaar"].includes(resolvedType) ? "numeric" : undefined}
+        />
+      );
+      break;
+    case "textarea":
+      field = (
+        <textarea
+          value={value || ""}
+          onChange={(e) => onChange(fieldName, e.target.value)}
+          placeholder={`Enter ${label}`}
+          rows={4}
+          style={{ ...inputBase, resize: "vertical", fontFamily: "inherit" }}
         />
       );
       break;

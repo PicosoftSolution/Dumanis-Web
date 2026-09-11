@@ -51,16 +51,18 @@ export default function Templates() {
   };
 
   return (
-    <div className="p-8">
+    // Padding shrinks on small screens; overflow-x-hidden stops any stray wide child from causing page-level horizontal scroll
+    <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">
       <div className="mb-6">
-        <div className="flex items-center gap-2 text-blue-700 font-semibold text-sm mb-1">
-          <Layers className="w-4 h-4" />
+        <div className="flex items-center gap-2 text-blue-700 font-semibold text-xs sm:text-sm mb-1">
+          <Layers className="w-4 h-4 shrink-0" />
           SmartForms Templates to Design
         </div>
-        <h1 className="text-2xl font-bold text-gray-900">Here You Can View And Search Your Templates</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Here You Can View And Search Your Templates</h1>
       </div>
 
-      <div className="relative max-w-md mb-8">
+      {/* Search bar goes full width on mobile instead of a fixed max-width */}
+      <div className="relative w-full max-w-md mb-6 sm:mb-8">
         <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
         <input
           type="text"
@@ -77,40 +79,41 @@ export default function Templates() {
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
         </div>
       ) : templates.length === 0 ? (
-        <div className="text-center py-24 text-gray-400">
+        <div className="text-center py-24 text-gray-400 px-4">
           <Layers className="w-10 h-10 mx-auto mb-3 opacity-40" />
           No templates match your search.
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
           {templates.map((t) => (
-            <div key={t._id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex flex-col">
-              <h3 className="text-lg font-bold text-gray-900 mb-2">{t.title}</h3>
+            <div key={t._id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6 flex flex-col min-w-0">
+              <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-2 break-words">{t.title}</h3>
               <div className="flex items-center gap-2 mb-3 flex-wrap">
                 <span className={`px-2.5 py-1 rounded-full text-white text-xs font-semibold ${TYPE_COLORS[t.type] || 'bg-gray-600'}`}>
                   {t.type}
                 </span>
-                <span className="text-gray-300">|</span>
+                <span className="text-gray-300 hidden xs:inline">|</span>
                 <span className="px-2.5 py-1 rounded-full bg-emerald-600 text-white text-xs font-semibold">
                   {t.category}
                 </span>
               </div>
-              <p className="text-sm text-gray-600 flex-1">{t.description}</p>
+              <p className="text-sm text-gray-600 flex-1 break-words">{t.description}</p>
               <div className="text-xs text-gray-500 mt-4 space-y-0.5">
                 <p><span className="font-semibold text-gray-700">Version:</span> {t.version}</p>
-                <p><span className="font-semibold text-gray-700">Author:</span> {t.author}</p>
+                <p className="truncate"><span className="font-semibold text-gray-700">Author:</span> {t.author}</p>
               </div>
-              <div className="flex items-center gap-2 mt-5">
+              {/* Buttons wrap to a second row on very narrow cards instead of squeezing */}
+              <div className="flex items-center gap-2 mt-5 flex-wrap">
                 <button
                   onClick={() => setPreviewTemplate(t)}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-rose-100 hover:bg-rose-200 text-rose-800 text-sm font-semibold rounded-full transition-colors"
+                  className="flex-1 min-w-[100px] flex items-center justify-center gap-1.5 px-3 py-2 bg-rose-100 hover:bg-rose-200 text-rose-800 text-sm font-semibold rounded-full transition-colors"
                 >
                   <Eye className="w-3.5 h-3.5" />
                   Preview
                 </button>
                 <button
                   onClick={() => setEditTemplate(t)}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-rose-100 hover:bg-rose-200 text-rose-800 text-sm font-semibold rounded-full transition-colors"
+                  className="flex-1 min-w-[100px] flex items-center justify-center gap-1.5 px-3 py-2 bg-rose-100 hover:bg-rose-200 text-rose-800 text-sm font-semibold rounded-full transition-colors"
                 >
                   <Pencil className="w-3.5 h-3.5" />
                   Edit
@@ -118,7 +121,7 @@ export default function Templates() {
                 <button
                   onClick={() => handleDuplicate(t._id)}
                   title="Duplicate this template"
-                  className="p-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full transition-colors"
+                  className="p-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full transition-colors shrink-0"
                 >
                   <Copy className="w-3.5 h-3.5" />
                 </button>
@@ -148,27 +151,28 @@ export default function Templates() {
 
 function PreviewModal({ template, onClose }) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    // p-3 on mobile so the modal doesn't touch screen edges; max-h keeps it scrollable within viewport
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-3 sm:p-4 z-50">
       <div className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-5 border-b border-gray-100">
-          <h2 className="text-lg font-bold text-gray-900">{template.title}</h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg">
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-gray-100 sticky top-0 bg-white z-10">
+          <h2 className="text-base sm:text-lg font-bold text-gray-900 break-words pr-2">{template.title}</h2>
+          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg shrink-0">
             <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
-        <div className="p-5 space-y-4">
-          <p className="text-sm text-gray-600">{template.description}</p>
+        <div className="p-4 sm:p-5 space-y-4">
+          <p className="text-sm text-gray-600 break-words">{template.description}</p>
           <div className="space-y-3">
             {template.questions.map((q, i) => (
               <div key={i} className="border border-gray-100 rounded-xl p-3">
-                <p className="text-sm font-medium text-gray-900">
+                <p className="text-sm font-medium text-gray-900 break-words">
                   {i + 1}. {q.label} {q.isMandatory && <span className="text-red-500">*</span>}
                 </p>
                 <p className="text-xs text-gray-400 mt-1 capitalize">{q.type.replace('_', ' ')}</p>
                 {q.options?.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {q.options.map((opt, j) => (
-                      <span key={j} className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">{opt}</span>
+                      <span key={j} className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full break-words">{opt}</span>
                     ))}
                   </div>
                 )}
@@ -235,16 +239,17 @@ function EditModal({ template, onClose, onSaved }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white z-10">
-          <h2 className="text-lg font-bold text-gray-900">Edit Template</h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-3 sm:p-4 z-50">
+      {/* max-h-[95vh] on mobile gives a bit more room since the screen itself is smaller */}
+      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-gray-100 sticky top-0 bg-white z-10">
+          <h2 className="text-base sm:text-lg font-bold text-gray-900">Edit Template</h2>
+          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg shrink-0">
             <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
 
-        <div className="p-5 space-y-5">
+        <div className="p-4 sm:p-5 space-y-5">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Title</label>
             <input
@@ -264,7 +269,7 @@ function EditModal({ template, onClose, onSaved }) {
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
               <label className="text-sm font-semibold text-gray-800">Questions</label>
               <button
                 onClick={addQuestion}
@@ -277,25 +282,28 @@ function EditModal({ template, onClose, onSaved }) {
             <div className="space-y-3">
               {questions.map((q, idx) => (
                 <div key={idx} className="border border-gray-100 rounded-xl p-3 space-y-2">
-                  <div className="flex items-center gap-2">
+                  {/* Stacks vertically on mobile so the type select and delete button don't get squeezed next to the label input */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                     <input
                       value={q.label}
                       onChange={(e) => updateQuestion(idx, { label: e.target.value })}
                       placeholder="Question label"
-                      className="flex-1 h-9 px-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                      className="flex-1 h-9 px-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 min-w-0"
                     />
-                    <select
-                      value={q.type}
-                      onChange={(e) => updateQuestion(idx, { type: e.target.value })}
-                      className="h-9 px-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    >
-                      {QUESTION_TYPES.map((t) => (
-                        <option key={t} value={t}>{t.replace('_', ' ')}</option>
-                      ))}
-                    </select>
-                    <button onClick={() => removeQuestion(idx)} className="p-2 text-gray-400 hover:text-red-600">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={q.type}
+                        onChange={(e) => updateQuestion(idx, { type: e.target.value })}
+                        className="h-9 px-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 flex-1 sm:flex-initial"
+                      >
+                        {QUESTION_TYPES.map((t) => (
+                          <option key={t} value={t}>{t.replace('_', ' ')}</option>
+                        ))}
+                      </select>
+                      <button onClick={() => removeQuestion(idx)} className="p-2 text-gray-400 hover:text-red-600 shrink-0">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
 
                   {(q.type === 'single_choice' || q.type === 'multi_choice' || q.type === 'rating') && (
@@ -324,14 +332,15 @@ function EditModal({ template, onClose, onSaved }) {
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-3 p-5 border-t border-gray-100 sticky bottom-0 bg-white">
+        {/* Footer buttons stretch full-width and stack on very small screens so they're easy to tap */}
+        <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3 p-4 sm:p-5 border-t border-gray-100 sticky bottom-0 bg-white">
           <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-lg">
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-800 hover:bg-blue-900 text-white text-sm font-semibold rounded-lg disabled:opacity-50"
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-800 hover:bg-blue-900 text-white text-sm font-semibold rounded-lg disabled:opacity-50"
           >
             <Save className="w-4 h-4" />
             {saving ? 'Saving…' : 'Save Template'}

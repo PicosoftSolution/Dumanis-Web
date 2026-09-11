@@ -145,78 +145,125 @@ export default function TeamMembers() {
 
   if (fetching) {
     return (
-      <div className="flex items-center justify-center h-96">
+      <div className="flex items-center justify-center h-96 px-4">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
       </div>
     );
   }
 
   return (
-    <div className="p-6">
+    // Padding shrinks on small screens; overflow-x-hidden stops accidental page-level horizontal scroll
+    <div className="p-4 sm:p-6 max-w-full overflow-x-hidden">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">Team Management</h1>
-        <p className="text-gray-500 mt-1">Manage leads and team members</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Team Management</h1>
+        <p className="text-gray-500 mt-1 text-sm sm:text-base">Manage leads and team members</p>
       </div>
 
+      {/* Search / filter / add bar — stacks fully on mobile, row layout from sm up */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
-        <div className="flex flex-col sm:flex-row justify-between gap-4">
-          <div className="flex gap-3 flex-1">
-            <div className="relative flex-1">
+        <div className="flex flex-col sm:flex-row justify-between gap-3 sm:gap-4">
+          <div className="flex flex-col xs:flex-row gap-3 flex-1">
+            <div className="relative flex-1 min-w-0">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input type="text" placeholder="Search team members..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}
-              className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+              className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-full xs:w-auto">
               <option value="all">All Roles</option>
               <option value="lead">Leads Only</option>
               <option value="team_member">Team Members Only</option>
             </select>
           </div>
           <button onClick={() => handleOpenModal()}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg">
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg w-full sm:w-auto shrink-0">
             <Plus className="w-4 h-4" />
             <span>Add Team Member</span>
           </button>
         </div>
       </div>
 
+      {/* Members list — stacked cards on mobile, table from sm up */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
+        {/* Mobile card list */}
+        <div className="sm:hidden divide-y divide-gray-100">
+          {filteredMembers.map((member) => (
+            <div key={member._id} className="p-4 flex flex-col gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${member.role === 'lead' ? 'bg-blue-100' : 'bg-green-100'}`}>
+                  {member.role === 'lead' ? <Shield className="w-5 h-5 text-blue-600" /> : <Users className="w-5 h-5 text-green-600" />}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-medium text-gray-900 truncate">{member.firstName} {member.lastName}</p>
+                  <p className="text-sm text-gray-500 truncate">{member.email}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`px-2 py-1 text-xs rounded-full font-medium ${member.role === 'lead' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                  {member.role === 'lead' ? 'Lead' : 'Team Member'}
+                </span>
+                <span className={`px-2 py-1 text-xs rounded-full font-medium ${member.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  {member.isActive ? 'Active' : 'Inactive'}
+                </span>
+                <span className="text-xs text-gray-500">{member.assignedProjects?.length || 0} project(s)</span>
+              </div>
+              {isSuperAdmin ? (
+                <span className="text-xs text-gray-400 italic">Managed by their Admin/Lead</span>
+              ) : (
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => handleOpenModal(member)} className="flex-1 flex items-center justify-center gap-1.5 py-2 text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 rounded-lg">
+                    <Edit2 className="w-4 h-4" /> Edit
+                  </button>
+                  <button onClick={() => toggleStatus(member)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-sm rounded-lg border ${member.isActive ? 'text-red-600 border-red-200 hover:bg-red-50' : 'text-green-600 border-green-200 hover:bg-green-50'}`}>
+                    <Power className="w-4 h-4" /> {member.isActive ? 'Deactivate' : 'Activate'}
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+          {filteredMembers.length === 0 && (
+            <div className="px-4 py-12 text-center text-gray-500 text-sm">No team members found</div>
+          )}
+        </div>
+
+        {/* Table for sm and up */}
+        <div className="hidden sm:block overflow-x-auto">
+          <table className="w-full min-w-[640px]">
             <thead className="bg-gray-50">
-              <tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Member</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Projects</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-              </tr></thead>
+              <tr>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Member</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Role</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Projects</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Status</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Actions</th>
+              </tr>
+            </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredMembers.map((member) => (
                 <tr key={member._id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center ${member.role === 'lead' ? 'bg-blue-100' : 'bg-green-100'}`}>
+                  <td className="px-4 md:px-6 py-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${member.role === 'lead' ? 'bg-blue-100' : 'bg-green-100'}`}>
                         {member.role === 'lead' ? <Shield className="w-5 h-5 text-blue-600" /> : <Users className="w-5 h-5 text-green-600" />}
                       </div>
-                      <div>
-                        <p className="font-medium text-gray-900">{member.firstName} {member.lastName}</p>
-                        <p className="text-sm text-gray-500">{member.email}</p>
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 truncate">{member.firstName} {member.lastName}</p>
+                        <p className="text-sm text-gray-500 truncate">{member.email}</p>
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs rounded-full font-medium ${member.role === 'lead' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                  <td className="px-4 md:px-6 py-4">
+                    <span className={`px-2 py-1 text-xs rounded-full font-medium whitespace-nowrap ${member.role === 'lead' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
                       {member.role === 'lead' ? 'Lead' : 'Team Member'}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{member.assignedProjects?.length || 0} project(s)</td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs rounded-full font-medium ${member.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  <td className="px-4 md:px-6 py-4 text-sm text-gray-600 whitespace-nowrap">{member.assignedProjects?.length || 0} project(s)</td>
+                  <td className="px-4 md:px-6 py-4">
+                    <span className={`px-2 py-1 text-xs rounded-full font-medium whitespace-nowrap ${member.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                       {member.isActive ? 'Active' : 'Inactive'}
                     </span>
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-4 md:px-6 py-4">
                     {isSuperAdmin ? (
                       <span className="text-xs text-gray-400 italic">Managed by their Admin/Lead</span>
                     ) : (
@@ -232,22 +279,29 @@ export default function TeamMembers() {
                   </td>
                 </tr>
               ))}
+              {filteredMembers.length === 0 && (
+                <tr>
+                  <td colSpan="5" className="px-6 py-12 text-center text-gray-500">
+                    No team members found
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Modal - Keep same as before */}
+      {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-md w-full shadow-xl">
-            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
-              <h2 className="text-xl font-semibold text-gray-800">{editingMember ? 'Edit Team Member' : 'Add Team Member'}</h2>
-              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3 sm:p-4">
+          <div className="bg-white rounded-xl max-w-md w-full shadow-xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
+            <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex justify-between items-center sticky top-0 bg-white z-10">
+              <h2 className="text-lg sm:text-xl font-semibold text-gray-800">{editingMember ? 'Edit Team Member' : 'Add Team Member'}</h2>
+              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600 shrink-0 ml-2">✕</button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              {/* Form fields - same as before */}
-              <div className="grid grid-cols-2 gap-4">
+            <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4">
+              {/* Name fields stack on very narrow screens, sit side by side from xs up */}
+              <div className="grid grid-cols-1 xs:grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">First Name *</label>
                   <input type="text" required value={formData.firstName} onChange={(e) => setFormData({...formData, firstName: e.target.value})}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
@@ -261,7 +315,7 @@ export default function TeamMembers() {
                 <input type="email" required value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 xs:grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
                   <input type="tel" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
@@ -285,15 +339,16 @@ export default function TeamMembers() {
                   {projects.map(project => (
                     <label key={project._id} className="flex items-center gap-3 cursor-pointer">
                       <input type="checkbox" checked={formData.assignedProjects.includes(project._id)} onChange={() => toggleProject(project._id)}
-                        className="w-4 h-4 text-blue-600 rounded" />
-                      <span className="text-sm text-gray-700">{project.name}</span>
+                        className="w-4 h-4 text-blue-600 rounded shrink-0" />
+                      <span className="text-sm text-gray-700 break-words">{project.name}</span>
                     </label>
                   ))}
                 </div>
               </div>
-              <div className="flex gap-3 pt-4">
+              {/* Buttons stack on mobile so they're easy to tap, sit side by side from xs up */}
+              <div className="flex flex-col xs:flex-row gap-3 pt-4">
                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-                <button type="submit" disabled={loading} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                <button type="submit" disabled={loading} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
                   {loading ? 'Saving...' : editingMember ? 'Update' : 'Add Member'}
                 </button>
               </div>
