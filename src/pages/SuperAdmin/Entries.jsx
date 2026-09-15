@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Calendar, User, FileText, CheckCircle, Clock, Eye, MapPin } from 'lucide-react';
+import { Search, Filter, Calendar, User, FileText, CheckCircle, Clock, Eye, MapPin, Copy } from 'lucide-react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 
@@ -49,6 +49,17 @@ export default function Entries() {
   const viewDetails = (entry) => {
     setSelectedEntry(entry);
     setShowDetailsModal(true);
+  };
+
+  // Copies a location's address (if present) plus its coordinates to the clipboard.
+  const copyLocation = (location) => {
+    if (!location) return;
+    const text = location.address
+      ? `${location.address} (${location.lat}, ${location.lon})`
+      : `${location.lat}, ${location.lon}`;
+    navigator.clipboard.writeText(text)
+      .then(() => toast.success('Location copied'))
+      .catch(() => toast.error('Failed to copy location'));
   };
 
   if (loading) {
@@ -135,7 +146,14 @@ export default function Entries() {
                       {entry.location?.lat ? (
                         <div className="flex items-center gap-1 text-xs text-gray-500">
                           <MapPin className="w-3 h-3 text-red-500" />
-                          <span className="truncate max-w-[150px]">{entry.location.lat}, {entry.location.lon}</span>
+                          <span className="truncate max-w-[130px]">{entry.location.lat}, {entry.location.lon}</span>
+                          <button
+                            onClick={() => copyLocation(entry.location)}
+                            title="Copy location"
+                            className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors shrink-0"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
                         </div>
                       ) : (
                         <span className="text-xs text-gray-400">—</span>
@@ -163,7 +181,7 @@ export default function Entries() {
                       )}
                     </td>
                     <td className="px-6 py-4">
-                      <button 
+                      <button
                         onClick={() => viewDetails(entry)}
                         className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                         title="View Details"
@@ -177,7 +195,7 @@ export default function Entries() {
             </tbody>
           </table>
         </div>
-        
+
         {filteredEntries.length > 0 && (
           <div className="px-6 py-4 border-t border-gray-100 bg-gray-50">
             <p className="text-sm text-gray-600">
@@ -220,9 +238,17 @@ export default function Entries() {
 
               {selectedEntry.location && (selectedEntry.location.lat || selectedEntry.location.address) && (
                 <div className="border-t border-gray-100 pt-4">
-                  <label className="text-xs text-gray-500 flex items-center gap-1 mb-2">
-                    <MapPin className="w-3 h-3" /> Location Details
-                  </label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs text-gray-500 flex items-center gap-1">
+                      <MapPin className="w-3 h-3" /> Location Details
+                    </label>
+                    <button
+                      onClick={() => copyLocation(selectedEntry.location)}
+                      className="flex items-center gap-1 px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    >
+                      <Copy className="w-3 h-3" /> Copy
+                    </button>
+                  </div>
                   <div className="bg-gray-50 p-3 rounded-lg">
                     {selectedEntry.location.address && (
                       <p className="text-sm text-gray-700 mb-1">{selectedEntry.location.address}</p>

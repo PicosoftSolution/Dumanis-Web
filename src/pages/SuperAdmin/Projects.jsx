@@ -149,6 +149,37 @@ export default function Projects() {
     }
   };
 
+  // Called by MapPicker whenever the pin moves — via search select, click, or drag.
+  // - If `address` is already known (search result was picked), use it directly.
+  // - Otherwise (map click / marker drag), set the coordinates immediately and
+  //   reverse-geocode in the background to fill in the place name.
+  const handleMapChange = async (la, ln, address) => {
+    if (address) {
+      setFormData(prev => ({
+        ...prev,
+        location: { lat: la.toFixed(6), lng: ln.toFixed(6), address }
+      }));
+      return;
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      location: { ...prev.location, lat: la.toFixed(6), lng: ln.toFixed(6) }
+    }));
+
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${la}&lon=${ln}`);
+      const data = await response.json();
+      setFormData(prev => ({
+        ...prev,
+        location: { ...prev.location, address: data.display_name || prev.location.address }
+      }));
+    } catch (error) {
+      // Reverse geocoding failed — coordinates are already saved, just no name this time.
+      console.error('Reverse geocoding failed:', error);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name) {
@@ -333,7 +364,7 @@ export default function Projects() {
       {/* Create/Edit Project Modal — redesigned: wider, sectioned, sticky header/footer, compact chip selectors */}
       {showModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl max-h-[88vh] flex flex-col">
+          <div className="bg-white rounded-2xl w-full max-w-3xl shadow-2xl max-h-[92vh] flex flex-col">
             {/* Header */}
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center shrink-0">
               <div>
@@ -440,11 +471,12 @@ export default function Projects() {
                       className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-colors"
                     />
                   </div>
-                  <div className="rounded-lg overflow-hidden border border-gray-200" style={{ height: '200px' }}>
+                  <div className="rounded-lg overflow-hidden border border-gray-200" style={{ height: '420px' }}>
                     <MapPicker
                       lat={formData.location.lat}
                       lng={formData.location.lng}
-                      onChange={(la, ln) => setFormData({ ...formData, location: { ...formData.location, lat: la.toFixed(6), lng: ln.toFixed(6) } })}
+                      height={420}
+                      onChange={handleMapChange}
                     />
                   </div>
                 </div>

@@ -148,14 +148,6 @@ export default function Login() {
               ) : 'Sign in'}
             </button>
           </form>
-
-          <p className="text-center text-xs text-gray-400 mt-8">
-            Don't have login details? Contact your Super Admin or Admin to get an account created.
-          </p>
-          <p className="text-center text-xs text-gray-400 mt-2">
-            Setting up this platform for the first time?{' '}
-            <Link to="/register" className="text-blue-700 font-medium hover:underline">Register as Super Admin</Link>
-          </p>
         </div>
       </div>
     </div>
