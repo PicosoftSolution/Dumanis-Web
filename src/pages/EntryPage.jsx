@@ -208,9 +208,12 @@ export default function EntryPage() {
                     <div className="min-w-0">
                       <p className="font-semibold text-gray-900 truncate">{p.name}</p>
                       {p.location?.address && (
-                        <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1 truncate">
-                          <MapPin className="w-3 h-3 shrink-0" /> {p.location.address}
-                        </p>
+                        <div className="flex items-start gap-1 mt-0.5">
+  <MapPin className="w-3 h-3 shrink-0 text-gray-500 mt-0.5" />
+  <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">
+    {p.location.address}
+  </p>
+</div>
                       )}
                     </div>
                   </button>
