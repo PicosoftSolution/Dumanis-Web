@@ -3,6 +3,18 @@ import { Search, Filter, Calendar, User, FileText, CheckCircle, Clock, Eye, MapP
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 
+// Turn a raw stored answer into something readable in the modal.
+// - arrays (multi_choice / checkbox answers) get joined with commas
+// - switch/boolean answers show as Yes/No instead of true/false
+// - base64 image answers are huge — don't dump the whole data: URI on screen
+const formatEntryValue = (value, type) => {
+  if (value === undefined || value === null || value === '') return '—';
+  if (Array.isArray(value)) return value.length ? value.join(', ') : '—';
+  if (type === 'switch' || typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (type === 'image' && typeof value === 'string' && value.startsWith('data:image')) return '📷 Photo attached';
+  return typeof value === 'object' ? JSON.stringify(value) : String(value);
+};
+
 export default function Entries() {
   const [submissions, setSubmissions] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -11,6 +23,13 @@ export default function Entries() {
   const [projectFilter, setProjectFilter] = useState('all');
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+
+  // Caches the question bank for a given project+formType so the "Form Data"
+  // section can show real labels ("Owner's Name") instead of the raw field
+  // id ("6AAB83AD500C1B3E418D1542") that submissions are actually keyed by.
+  // Keyed by `${projectId}::${formType}` -> { [fieldName]: { label, type } }.
+  const [formFieldMaps, setFormFieldMaps] = useState({});
+  const [loadingFieldMap, setLoadingFieldMap] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -46,9 +65,38 @@ export default function Entries() {
     return found?.name || project || '—';
   };
 
-  const viewDetails = (entry) => {
+  const fieldMapKey = (entry) => {
+    const projectId = entry?.project?._id || entry?.project;
+    return `${projectId}::${entry?.formType}`;
+  };
+
+  const viewDetails = async (entry) => {
     setSelectedEntry(entry);
     setShowDetailsModal(true);
+
+    const projectId = entry.project?._id || entry.project;
+    const key = fieldMapKey(entry);
+
+    // Already have this project+formType's questions cached, or missing the
+    // info needed to look it up — nothing more to fetch.
+    if (!projectId || !entry.formType || formFieldMaps[key]) return;
+
+    setLoadingFieldMap(true);
+    try {
+      const res = await api.get(`/forms/render/${projectId}/${encodeURIComponent(entry.formType)}`);
+      if (res.data.success) {
+        const map = {};
+        (res.data.data.questions || []).forEach((q) => {
+          map[q.fieldName] = { label: q.label, type: q.type };
+        });
+        setFormFieldMaps((prev) => ({ ...prev, [key]: map }));
+      }
+    } catch (err) {
+      console.error('Could not load question labels for this entry:', err);
+      // Not fatal — the modal falls back to showing the raw field key below.
+    } finally {
+      setLoadingFieldMap(false);
+    }
   };
 
   // Copies a location's address (if present) plus its coordinates to the clipboard.
@@ -263,14 +311,27 @@ export default function Entries() {
               )}
 
               <div className="border-t border-gray-100 pt-4">
-                <label className="text-xs text-gray-500 mb-2 block">Form Data</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs text-gray-500 block">Form Data</label>
+                  {loadingFieldMap && !formFieldMaps[fieldMapKey(selectedEntry)] && (
+                    <span className="text-xs text-gray-400">Loading question labels…</span>
+                  )}
+                </div>
                 <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-                  {selectedEntry.data && Object.entries(selectedEntry.data).map(([key, value]) => (
-                    <div key={key} className="border-b border-gray-200 pb-2 last:border-0">
-                      <span className="text-xs font-medium text-gray-700 block">{key.replace(/_/g, ' ').toUpperCase()}</span>
-                      <span className="text-sm text-gray-900">{typeof value === 'object' ? JSON.stringify(value) : value || '—'}</span>
-                    </div>
-                  ))}
+                  {selectedEntry.data && Object.entries(selectedEntry.data).map(([key, value]) => {
+                    const questionMeta = formFieldMaps[fieldMapKey(selectedEntry)]?.[key];
+                    // Falls back to the raw key (prettified) only if we couldn't
+                    // find this field in the form's question bank — e.g. the
+                    // question was later deleted, or the form couldn't be loaded.
+                    const displayLabel = questionMeta?.label || key.replace(/_/g, ' ').toUpperCase();
+                    const displayValue = formatEntryValue(value, questionMeta?.type);
+                    return (
+                      <div key={key} className="border-b border-gray-200 pb-2 last:border-0">
+                        <span className="text-xs font-medium text-gray-700 block">{displayLabel}</span>
+                        <span className="text-sm text-gray-900">{displayValue}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>

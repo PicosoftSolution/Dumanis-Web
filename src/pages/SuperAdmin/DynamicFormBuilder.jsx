@@ -80,7 +80,24 @@ function QuestionRow({ fq, index, onToggleVisible, onToggleMandatory, onMoveUp, 
 
 const btnSm = { padding: "2px 8px", border: "1px solid #ddd", borderRadius: 4, cursor: "pointer", background: "#fff" };
 
-const QUESTION_TYPES = ["text", "number", "email", "phone", "radio", "checkbox", "textarea", "ratio", ];
+// These must stay in sync with the TYPE_ALIASES map in SurveyForm.jsx —
+// whatever "type" gets saved here is exactly what decides which input the
+// field agent sees. Missing an entry here (e.g. "select"/"date"/"time"/
+// "switch"/"phone" were missing before) meant that type silently fell back
+// to a plain text box on the survey form.
+const QUESTION_TYPES = [
+  "text",       // free text
+  "email",      // validated email address
+  "phone",      // validated 10-digit phone number
+  "date",       // date picker
+  "time",       // time picker
+  "select",     // dropdown (needs options)
+  "radio",      // single choice pills (needs options)
+  "checkbox",   // multi choice pills (needs options)
+  "switch",     // yes/no toggle
+  "textarea",   // multi-line text
+];
+
 const needsOptionsFor = (type) => ["select", "radio", "checkbox"].includes(type);
 
 // Turn a question's saved options ([{label, value}]) back into the

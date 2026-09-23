@@ -31,12 +31,13 @@ export const optLabel = (opt) => {
 };
 
 // The Question bank (DynamicFormBuilder) saves types as "select" / "radio" /
-// "checkbox" / "email" / "phone" / "textarea". Some older records (or forms
-// built before that naming) may still use "dropdown" / "single_choice" /
-// "multi_choice". Normalize both spellings to one canonical set here so
-// adding a question in the builder is guaranteed to render the matching
-// field here — this is what was causing radio/checkbox to fall through to
-// a plain text box.
+// "checkbox" / "email" / "phone" / "date" / "time" / "switch" / "textarea".
+// Some older records (or forms built before that naming) may still use
+// "dropdown" / "single_choice" / "multi_choice" / "datetime" / "toggle" /
+// "boolean". Normalize all spellings to one canonical set here so adding a
+// question in the builder is guaranteed to render the matching field here —
+// this is what was causing radio/checkbox/date/time/switch to fall through
+// to a plain text box.
 const TYPE_ALIASES = {
   select: "dropdown",
   dropdown: "dropdown",
@@ -44,12 +45,37 @@ const TYPE_ALIASES = {
   single_choice: "single_choice",
   checkbox: "multi_choice",
   multi_choice: "multi_choice",
+  date: "date",
+  time: "time",
+  datetime: "datetime",
+  "datetime-local": "datetime",
+  switch: "switch",
+  toggle: "switch",
+  boolean: "switch",
+};
+
+// Simple, permissive format checks — good enough to catch typos without
+// being so strict they reject legitimate real-world entries.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Accepts a 10-digit Indian mobile number, optionally with +91 / 0 prefix
+// and any spaces/dashes the user typed.
+const PHONE_RE = /^(?:\+?91[\s-]?)?0?([6-9]\d{9})$/;
+
+export const validateFieldFormat = (resolvedType, rawValue) => {
+  if (rawValue === undefined || rawValue === null || rawValue === "") return null;
+  if (resolvedType === "email") {
+    return EMAIL_RE.test(String(rawValue).trim()) ? null : "Enter a valid email address";
+  }
+  if (resolvedType === "phone" || resolvedType === "mobile") {
+    return PHONE_RE.test(String(rawValue).trim()) ? null : "Enter a valid 10-digit phone number";
+  }
+  return null;
 };
 
 // ── Field renderer ────────────────────────────────────────────
 // Exported so other screens (e.g. the "edit my entry" modal) can render the
 // exact same question types without duplicating this logic.
-export function FormField({ question, value, onChange, error }) {
+export function FormField({ question, value, onChange, error, onBlur }) {
   const { label, fieldName, type, options, isMandatory } = question;
   const resolvedType = TYPE_ALIASES[type] || type;
 
@@ -71,18 +97,41 @@ export function FormField({ question, value, onChange, error }) {
     case "mobile":
     case "aadhaar":
     case "date":
+    case "time":
+    case "datetime":
       field = (
         <input
           type={
             resolvedType === "date" ? "date"
+            : resolvedType === "time" ? "time"
+            : resolvedType === "datetime" ? "datetime-local"
             : resolvedType === "number" ? "number"
             : resolvedType === "email" ? "email"
             : resolvedType === "phone" || resolvedType === "mobile" ? "tel"
             : "text"
           }
           value={value || ""}
-          onChange={(e) => onChange(fieldName, e.target.value)}
-          placeholder={`Enter ${label}`}
+          onChange={(e) => {
+            let v = e.target.value;
+            // Block the wrong kind of character as the user types, instead
+            // of only catching it at submit time:
+            if (resolvedType === "phone" || resolvedType === "mobile") {
+              // Phone: digits only, max 10 — letters/symbols never make it in.
+              v = v.replace(/\D/g, "").slice(0, 10);
+            } else if (resolvedType === "aadhaar") {
+              v = v.replace(/\D/g, "").slice(0, 12);
+            } else if (resolvedType === "email") {
+              // Email: no spaces — letters/numbers/symbols like @ . _ - are fine.
+              v = v.replace(/\s/g, "");
+            }
+            onChange(fieldName, v);
+          }}
+          onBlur={() => onBlur && onBlur(fieldName, value)}
+          placeholder={
+            resolvedType === "email" ? "name@example.com"
+            : resolvedType === "phone" || resolvedType === "mobile" ? "10-digit mobile number"
+            : `Enter ${label}`
+          }
           style={inputBase}
           inputMode={["phone", "mobile", "aadhaar"].includes(resolvedType) ? "numeric" : undefined}
         />
@@ -93,6 +142,7 @@ export function FormField({ question, value, onChange, error }) {
         <textarea
           value={value || ""}
           onChange={(e) => onChange(fieldName, e.target.value)}
+          onBlur={() => onBlur && onBlur(fieldName, value)}
           placeholder={`Enter ${label}`}
           rows={4}
           style={{ ...inputBase, resize: "vertical", fontFamily: "inherit" }}
@@ -121,6 +171,41 @@ export function FormField({ question, value, onChange, error }) {
           placeholder="e.g. 1:2"
           style={inputBase}
         />
+      );
+      break;
+    case "switch":
+      field = (
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+          <span
+            role="switch"
+            aria-checked={!!value}
+            onClick={() => onChange(fieldName, !value)}
+            style={{
+              width: 42,
+              height: 24,
+              borderRadius: 12,
+              background: value ? "#1a73e8" : "#ccc",
+              position: "relative",
+              transition: "background 0.2s ease",
+              flexShrink: 0,
+            }}
+          >
+            <span
+              style={{
+                position: "absolute",
+                top: 2,
+                left: value ? 20 : 2,
+                width: 20,
+                height: 20,
+                borderRadius: "50%",
+                background: "#fff",
+                transition: "left 0.2s ease",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+              }}
+            />
+          </span>
+          <span style={{ fontSize: 13.5, color: "#444" }}>{value ? "Yes" : "No"}</span>
+        </label>
       );
       break;
     case "dropdown":
@@ -354,18 +439,45 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
       });
   }, [projectId, formType]);
 
-  const handleChange = (fieldName, value) => {
+  const handleChange = (fieldName, value, question) => {
     setAnswers((prev) => ({ ...prev, [fieldName]: value }));
-    setErrors((prev) => ({ ...prev, [fieldName]: null }));
+
+    // Re-check format (email/phone) on every keystroke, so a wrong Gmail or
+    // a bad phone number shows its error immediately — not only after the
+    // user hits Submit. Don't nag about "required" here; that's for onBlur,
+    // otherwise every field would show a red error the instant it's touched.
+    const resolvedType = TYPE_ALIASES[question?.type] || question?.type;
+    const isEmpty = value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
+    const formatError = isEmpty ? null : validateFieldFormat(resolvedType, value);
+    setErrors((prev) => ({ ...prev, [fieldName]: formatError }));
+  };
+
+  // Fires when the user leaves a field. Catches the "required" case, which
+  // handleChange deliberately skips while they're still typing.
+  const handleBlur = (fieldName, value, question) => {
+    if (!question?.isMandatory) return;
+    const isEmpty = value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
+    if (isEmpty) {
+      setErrors((prev) => ({ ...prev, [fieldName]: `${question.label} is required` }));
+    }
   };
 
   const validate = () => {
     const errs = {};
     (form?.questions || []).forEach((q) => {
-      if (q.isMandatory) {
-        const val = answers[q.fieldName];
-        const isEmpty = val === undefined || val === null || val === "" || (Array.isArray(val) && val.length === 0);
-        if (isEmpty) errs[q.fieldName] = `${q.label} is required`;
+      const resolvedType = TYPE_ALIASES[q.type] || q.type;
+      const val = answers[q.fieldName];
+      const isEmpty = val === undefined || val === null || val === "" || (Array.isArray(val) && val.length === 0);
+
+      if (q.isMandatory && isEmpty) {
+        errs[q.fieldName] = `${q.label} is required`;
+        return;
+      }
+      // Format checks (email/phone) run whenever something was typed,
+      // even for optional fields — an invalid email is invalid either way.
+      if (!isEmpty) {
+        const formatError = validateFieldFormat(resolvedType, val);
+        if (formatError) errs[q.fieldName] = formatError;
       }
     });
     return errs;
@@ -535,7 +647,8 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
               <FormField
                 question={q}
                 value={answers[q.fieldName]}
-                onChange={handleChange}
+                onChange={(fieldName, value) => handleChange(fieldName, value, q)}
+                onBlur={(fieldName, value) => handleBlur(fieldName, value, q)}
                 error={errors[q.fieldName]}
               />
             </div>
