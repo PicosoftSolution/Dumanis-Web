@@ -1,8 +1,7 @@
 // ============================================================
 // FILE: src/pages/admin/FormResponsesViewer.jsx
 // Admin review: submissions with merged question labels + export
-// FIXED: error handling (loading stuck bug), from/to date range +
-// month shortcut, clearer submitted-by display
+// Excel / CSV / PDF are generated client-side (all questions + answers)
 // ============================================================
 import { useState, useEffect, Fragment } from "react";
 
@@ -28,7 +27,8 @@ export default function FormResponsesViewer() {
   const [toDate, setToDate] = useState("");
 
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");          // NEW: surfaced errors
+  const [exporting, setExporting] = useState("");
+  const [error, setError] = useState("");
   const [projectsError, setProjectsError] = useState("");
   const [expandedId, setExpandedId] = useState(null);
 
@@ -70,10 +70,8 @@ export default function FormResponsesViewer() {
     setPage(1);
   };
 
-  const buildParams = () => {
-    const params = new URLSearchParams({ page, limit: 15 });
-    // Send both a range (from/to) — backend should filter submittedAt
-    // between these — and keep "date" for older single-day behavior.
+  const buildParams = (pageNo = page, limit = 15) => {
+    const params = new URLSearchParams({ page: pageNo, limit });
     if (fromDate) params.append("from", fromDate);
     if (toDate) params.append("to", toDate);
     return params;
@@ -112,41 +110,12 @@ export default function FormResponsesViewer() {
         );
         setResponses([]);
       })
-      .finally(() => setLoading(false)); // ALWAYS clears loading, even on error
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => { loadResponses(); }, [projectId, formType, page, fromDate, toDate]);
 
-  const exportFile = (format) => {
-    const params = new URLSearchParams();
-    if (fromDate) params.append("from", fromDate);
-    if (toDate) params.append("to", toDate);
-    const url = `${API}/api/export/${format}/${projectId}/${encodeURIComponent(formType)}?${params}`;
-
-    fetch(url, { headers: headers() })
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`Export failed (${r.status})`);
-        return r.blob();
-      })
-      .then((blob) => {
-        const ext = format === "geojson" ? "geojson" : format;
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        const rangeLabel = fromDate || toDate ? `_${fromDate || "start"}_to_${toDate || "end"}` : "";
-        a.download = `${formType}_survey${rangeLabel}.${ext}`;
-        a.click();
-        URL.revokeObjectURL(a.href);
-      })
-      .catch((err) => {
-        console.error("Export error:", err);
-        alert("Export failed: " + err.message);
-      });
-  };
-
-  const fieldNames = Object.keys(questionMap);
-
-  // Guards against backend sending literal "undefined"/"null" text
-  // (e.g. from `${user.firstName} ${user.lastName}` when those fields don't exist)
+  // ───────────────────────── EXPORT HELPERS ─────────────────────────
   const cleanText = (v) => {
     if (v === null || v === undefined) return null;
     const s = String(v).trim();
@@ -155,8 +124,201 @@ export default function FormResponsesViewer() {
     return s;
   };
 
+  const submitterText = (sub) => {
+    const s = sub.submittedBy;
+    if (!s || typeof s !== "object") return { name: "Unknown", contact: "" };
+    const first = cleanText(s.firstName);
+    const last = cleanText(s.lastName);
+    const name = first || last ? `${first || ""} ${last || ""}`.trim() : "Unknown";
+    const contact = cleanText(s.email) || cleanText(s.phone) || "";
+    return { name, contact };
+  };
+
+  // Fetch EVERY page of responses for the current filters
+  const fetchAllResponses = async () => {
+    let all = [];
+    let qMap = {};
+    let pageNo = 1;
+    let totalPages = 1;
+    do {
+      const params = buildParams(pageNo, 100);
+      const r = await fetch(
+        `${API}/api/forms/responses/${projectId}/${encodeURIComponent(formType)}?${params}`,
+        { headers: headers() }
+      );
+      if (!r.ok) throw new Error(`Request failed (${r.status})`);
+      const json = await r.json();
+      if (!json.success) throw new Error(json.message || "Could not load responses");
+      all = all.concat(json.data || []);
+      if (json.questionMap && Object.keys(json.questionMap).length) qMap = { ...qMap, ...json.questionMap };
+      totalPages = json.pages || 1;
+      pageNo += 1;
+    } while (pageNo <= totalPages);
+    return { all, qMap };
+  };
+
+  const labelFor = (fn, qMap, subs) => {
+    const q = qMap[fn];
+    if (typeof q === "string" && q) return q;
+    if (q?.label) return q.label;
+    for (const s of subs) {
+      const c = s.data?.[fn];
+      if (c?.label) return c.label;
+    }
+    return fn;
+  };
+
+  const cellText = (cell) => {
+    if (cell === null || cell === undefined) return "";
+    const isWrapped = typeof cell === "object" && !Array.isArray(cell) && "value" in cell;
+    const v = isWrapped ? cell.value : cell;
+    if (v === null || v === undefined || v === "") return "";
+    if (isWrapped && cell.type === "image") return typeof v === "string" && v.startsWith("http") ? v : "[Photo]";
+    if (typeof v === "string" && v.startsWith("data:image")) return "[Photo]";
+    if (Array.isArray(v)) return v.map((x) => (typeof x === "object" ? JSON.stringify(x) : String(x))).join(", ");
+    if (typeof v === "boolean") return v ? "Yes" : "No";
+    if (typeof v === "object") return JSON.stringify(v);
+    return String(v);
+  };
+
+  // Ordered list of question keys: questionMap first, then anything extra found in data
+  const getFieldKeys = (subs, qMap) => {
+    const keys = Object.keys(qMap);
+    subs.forEach((s) => Object.keys(s.data || {}).forEach((k) => { if (!keys.includes(k)) keys.push(k); }));
+    return keys;
+  };
+
+  const buildTable = (subs, qMap) => {
+    const keys = getFieldKeys(subs, qMap);
+    const head = ["#", "Submitted By", "Contact", "Date", "Latitude", "Longitude", "Address", ...keys.map((k) => labelFor(k, qMap, subs))];
+    const rows = subs.map((sub, i) => {
+      const { name, contact } = submitterText(sub);
+      return [
+        i + 1,
+        name,
+        contact,
+        sub.submittedAt ? new Date(sub.submittedAt).toLocaleString("en-IN") : "",
+        sub.location?.lat ?? "",
+        sub.location?.lon ?? "",
+        sub.location?.address ?? "",
+        ...keys.map((k) => cellText(sub.data?.[k])),
+      ];
+    });
+    return { head, rows, keys };
+  };
+
+  const fileName = (ext) => {
+    const rangeLabel = fromDate || toDate ? `_${fromDate || "start"}_to_${toDate || "end"}` : "";
+    return `${formType}_survey${rangeLabel}.${ext}`;
+  };
+
+  const saveBlob = (blob, name) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+
+  const exportCSV = (head, rows) => {
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = [head, ...rows].map((r) => r.map(esc).join(",")).join("\r\n");
+    // BOM so Excel reads Telugu/Unicode correctly
+    saveBlob(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }), fileName("csv"));
+  };
+
+  const exportExcel = async (head, rows) => {
+    const XLSX = await import("xlsx");
+    const ws = XLSX.utils.aoa_to_sheet([head, ...rows]);
+    ws["!cols"] = head.map((h, c) => {
+      const max = Math.max(String(h).length, ...rows.map((r) => String(r[c] ?? "").length));
+      return { wch: Math.min(Math.max(max + 2, 10), 50) };
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Responses");
+    XLSX.writeFile(wb, fileName("xlsx"));
+  };
+
+  const exportPDF = async (subs, qMap, keys) => {
+    const { jsPDF } = await import("jspdf");
+    const autoTable = (await import("jspdf-autotable")).default;
+    const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+
+    doc.setFontSize(16);
+    doc.text(`${formType} Survey Responses`, 40, 40);
+    doc.setFontSize(10);
+    const proj = projects.find((p) => p._id === projectId)?.name || "";
+    doc.text(`Project: ${proj}   |   Total: ${subs.length}${fromDate || toDate ? `   |   ${fromDate || "…"} to ${toDate || "…"}` : ""}`, 40, 58);
+
+    let y = 76;
+    subs.forEach((sub, i) => {
+      const { name, contact } = submitterText(sub);
+      const body = [
+        ["Submitted By", `${name}${contact ? ` (${contact})` : ""}`],
+        ["Date", sub.submittedAt ? new Date(sub.submittedAt).toLocaleString("en-IN") : ""],
+      ];
+      if (sub.location?.lat != null && sub.location?.lon != null) {
+        body.push(["Location", `${Number(sub.location.lat).toFixed(5)}, ${Number(sub.location.lon).toFixed(5)}`]);
+      }
+      if (sub.location?.address) body.push(["Address", sub.location.address]);
+      keys.forEach((k) => body.push([labelFor(k, qMap, subs), cellText(sub.data?.[k]) || "—"]));
+
+      autoTable(doc, {
+        startY: y,
+        head: [[{ content: `Submission #${i + 1}`, colSpan: 2 }]],
+        body,
+        theme: "grid",
+        styles: { fontSize: 9, cellPadding: 4, overflow: "linebreak" },
+        headStyles: { fillColor: [26, 115, 232] },
+        columnStyles: { 0: { cellWidth: 190, fontStyle: "bold" }, 1: { cellWidth: pageW - 80 - 190 } },
+        margin: { left: 40, right: 40 },
+      });
+      y = doc.lastAutoTable.finalY + 18;
+    });
+
+    doc.save(fileName("pdf"));
+  };
+
+  const exportGeoJSON = async () => {
+    const params = new URLSearchParams();
+    if (fromDate) params.append("from", fromDate);
+    if (toDate) params.append("to", toDate);
+    const r = await fetch(`${API}/api/export/geojson/${projectId}/${encodeURIComponent(formType)}?${params}`, { headers: headers() });
+    if (!r.ok) throw new Error(`Export failed (${r.status})`);
+    saveBlob(await r.blob(), fileName("geojson"));
+  };
+
+  const exportFile = async (format) => {
+    if (!projectId || exporting) return;
+    setExporting(format);
+    try {
+      if (format === "geojson") {
+        await exportGeoJSON();
+      } else {
+        const { all, qMap } = await fetchAllResponses();
+        if (all.length === 0) {
+          alert("No submissions to export for the selected filters.");
+          return;
+        }
+        const { head, rows, keys } = buildTable(all, qMap);
+        if (format === "csv") exportCSV(head, rows);
+        else if (format === "excel") await exportExcel(head, rows);
+        else if (format === "pdf") await exportPDF(all, qMap, keys);
+      }
+    } catch (err) {
+      console.error("Export error:", err);
+      alert("Export failed: " + err.message);
+    } finally {
+      setExporting("");
+    }
+  };
+
+  const fieldNames = Object.keys(questionMap);
+
   // Helper to render submitter info with fallbacks
-  // NOTE: submittedBy uses firstName/lastName + email (same shape as Entries.jsx)
   const renderSubmitter = (sub) => {
     const s = sub.submittedBy;
     if (!s || typeof s !== "object") return <span style={{ color: "#999" }}>Unknown</span>;
@@ -208,11 +370,11 @@ export default function FormResponsesViewer() {
 
         {/* Export buttons */}
         {projectId && (
-          <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
-            <ExportBtn label="📊 Excel" color="#1e7e34" onClick={() => exportFile("excel")} />
-            <ExportBtn label="🗺 GeoJSON" color="#6f42c1" onClick={() => exportFile("geojson")} />
-            <ExportBtn label="📄 CSV" color="#fd7e14" onClick={() => exportFile("csv")} />
-            <ExportBtn label="📑 PDF" color="#dc3545" onClick={() => exportFile("pdf")} />
+          <div style={{ display: "flex", gap: 8, marginLeft: "auto", alignItems: "center" }}>
+            {exporting && <span style={{ fontSize: 12, color: "#666" }}>Preparing {exporting}...</span>}
+            <ExportBtn label="📊 Excel" color="#1e7e34" disabled={!!exporting} onClick={() => exportFile("excel")} />
+            <ExportBtn label="📄 CSV" color="#fd7e14" disabled={!!exporting} onClick={() => exportFile("csv")} />
+            <ExportBtn label="📑 PDF" color="#dc3545" disabled={!!exporting} onClick={() => exportFile("pdf")} />
           </div>
         )}
       </div>
@@ -333,10 +495,11 @@ export default function FormResponsesViewer() {
   );
 }
 
-const ExportBtn = ({ label, color, onClick }) => (
+const ExportBtn = ({ label, color, onClick, disabled }) => (
   <button
     onClick={onClick}
-    style={{ padding: "6px 14px", background: color, color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontWeight: 600, fontSize: 12 }}
+    disabled={disabled}
+    style={{ padding: "6px 14px", background: color, color: "#fff", border: "none", borderRadius: 5, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.6 : 1, fontWeight: 600, fontSize: 12 }}
   >
     {label}
   </button>

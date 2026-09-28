@@ -96,6 +96,7 @@ const QUESTION_TYPES = [
   "checkbox",   // multi choice pills (needs options)
   "switch",     // yes/no toggle
   "textarea",   // multi-line text
+  "location", 
 ];
 
 const needsOptionsFor = (type) => ["select", "radio", "checkbox"].includes(type);

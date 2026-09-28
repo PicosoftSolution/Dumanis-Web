@@ -12,7 +12,7 @@ import EntryPage from './pages/EntryPage';
 // Dashboards
 import SuperAdminDashboard from './pages/SuperAdmin/SuperAdminPortal';
 import AdminDashboard from './pages/Admin/AdminPortal';
-import LeadDashboard from './pages/Leaddashboard';
+import LeadPortal from './pages/TeamLead/LeadPortal';   // NEW: Team Lead portal (replaces ./pages/Leaddashboard)
 import TeamMemberDashboard from './pages/TeamMember/TeamMemberPortal';
 
 // Super Admin pages
@@ -114,12 +114,12 @@ function App() {
           }
         />
 
-        {/* Lead Dashboard */}
+        {/* Team Lead Portal (Lead only) */}
         <Route
           path="/dashboard/lead"
           element={
-            <ProtectedRoute allowedRoles={['super_admin', 'admin', 'lead']}>
-              <LeadDashboard />
+            <ProtectedRoute allowedRoles={['lead']}>
+              <LeadPortal />
             </ProtectedRoute>
           }
         />
@@ -152,4 +152,4 @@ function App() {
   );
 }
 
-export default App; 
+export default App;

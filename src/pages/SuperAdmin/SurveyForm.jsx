@@ -1,18 +1,9 @@
-// ============================================================
-// FILE: src/pages/survey/SurveyForm.jsx
-// Field agent fills the dynamic form (supports offline too)
-// Usage: <SurveyForm projectId="..." formType="Residential" />
-// ============================================================
+
 import { useState, useEffect } from "react";
 import api from "../../api/axios";
 import { queueSubmission, cacheForm, getCachedForm } from "../../utils/offlineSync";
 import MapPicker from "../../components/MapPicker";
 
-// Options can arrive as plain strings, as {label, value, score} objects
-// (Mongoose subdocuments from the Question bank), or — from older bad data —
-// as a raw string that got mis-cast into a char-indexed object like
-// {0:'Y',1:'e',2:'s',_id:...}. Normalize all three shapes safely so React
-// never gets handed a raw object as a key or as children.
 const reconstruct = (obj) => {
   const chars = Object.keys(obj).filter((k) => /^\d+$/.test(k)).sort((a, b) => a - b).map((k) => obj[k]);
   return chars.length ? chars.join('') : '';
@@ -30,14 +21,6 @@ export const optLabel = (opt) => {
   return reconstruct(opt);
 };
 
-// The Question bank (DynamicFormBuilder) saves types as "select" / "radio" /
-// "checkbox" / "email" / "phone" / "date" / "time" / "switch" / "textarea".
-// Some older records (or forms built before that naming) may still use
-// "dropdown" / "single_choice" / "multi_choice" / "datetime" / "toggle" /
-// "boolean". Normalize all spellings to one canonical set here so adding a
-// question in the builder is guaranteed to render the matching field here —
-// this is what was causing radio/checkbox/date/time/switch to fall through
-// to a plain text box.
 const TYPE_ALIASES = {
   select: "dropdown",
   dropdown: "dropdown",
@@ -52,13 +35,12 @@ const TYPE_ALIASES = {
   switch: "switch",
   toggle: "switch",
   boolean: "switch",
+  location: "location",
+  map: "location",
 };
 
-// Simple, permissive format checks — good enough to catch typos without
-// being so strict they reject legitimate real-world entries.
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-// Accepts a 10-digit Indian mobile number, optionally with +91 / 0 prefix
-// and any spaces/dashes the user typed.
 const PHONE_RE = /^(?:\+?91[\s-]?)?0?([6-9]\d{9})$/;
 
 export const validateFieldFormat = (resolvedType, rawValue) => {
@@ -72,10 +54,52 @@ export const validateFieldFormat = (resolvedType, rawValue) => {
   return null;
 };
 
+// ── Location (map) field ──────────────────────────────────────
+function LocationField({ fieldName, value, onChange, gps, gpsStatus, onRetryGPS }) {
+  // Auto-fill from device GPS once (user can still correct it manually)
+  useEffect(() => {
+    if (!value && gps) {
+      onChange(fieldName, `${gps.lat.toFixed(6)}, ${gps.lon.toFixed(6)}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gps]);
+
+  const [lat, lon] = String(value || "").split(",").map((s) => parseFloat(s));
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lon);
+
+  const useMyGPS = () => {
+    if (gps) onChange(fieldName, `${gps.lat.toFixed(6)}, ${gps.lon.toFixed(6)}`);
+    else onRetryGPS && onRetryGPS();
+  };
+
+  return (
+    <div>
+      <MapPicker
+        lat={hasCoords ? lat : ""}
+        lng={hasCoords ? lon : ""}
+        height={260}
+        onChange={(la, ln) => onChange(fieldName, `${la.toFixed(6)}, ${ln.toFixed(6)}`)}
+      />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, color: hasCoords ? "#2e7d32" : "#e65100" }}>
+          {hasCoords
+            ? `📍 ${lat.toFixed(5)}, ${lon.toFixed(5)}`
+            : gpsStatus === "loading" ? "Fetching your location..." : "Location not set — tap the map to place the pin"}
+        </span>
+        <button
+          type="button"
+          onClick={useMyGPS}
+          style={{ padding: "4px 10px", fontSize: 12, border: "1px solid #1a73e8", background: "#fff", color: "#1a73e8", borderRadius: 4, cursor: "pointer" }}
+        >
+          Use my current GPS
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Field renderer ────────────────────────────────────────────
-// Exported so other screens (e.g. the "edit my entry" modal) can render the
-// exact same question types without duplicating this logic.
-export function FormField({ question, value, onChange, error, onBlur }) {
+export function FormField({ question, value, onChange, error, onBlur, gps, gpsStatus, onRetryGPS }) {
   const { label, fieldName, type, options, isMandatory } = question;
   const resolvedType = TYPE_ALIASES[type] || type;
 
@@ -114,7 +138,6 @@ export function FormField({ question, value, onChange, error, onBlur }) {
           onChange={(e) => {
             let v = e.target.value;
             // Block the wrong kind of character as the user types, instead
-            // of only catching it at submit time:
             if (resolvedType === "phone" || resolvedType === "mobile") {
               // Phone: digits only, max 10 — letters/symbols never make it in.
               v = v.replace(/\D/g, "").slice(0, 10);
@@ -170,6 +193,18 @@ export function FormField({ question, value, onChange, error, onBlur }) {
           onChange={(e) => onChange(fieldName, e.target.value)}
           placeholder="e.g. 1:2"
           style={inputBase}
+        />
+      );
+      break;
+    case "location":
+      field = (
+        <LocationField
+          fieldName={fieldName}
+          value={value}
+          onChange={onChange}
+          gps={gps}
+          gpsStatus={gpsStatus}
+          onRetryGPS={onRetryGPS}
         />
       );
       break;
@@ -397,10 +432,6 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
     setLoading(true);
     setLoadError(false);
 
-    // If the browser reports offline, skip the network attempt entirely
-    // and go straight to the cached copy of this exact form. Thanks to
-    // EntryPage's preloadAllForms(), this cache exists even if the user
-    // has never opened this specific project/form combination before.
     if (!navigator.onLine) {
       const cached = getCachedForm(projectId, formType);
       if (cached) setForm(cached);
@@ -420,8 +451,7 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
         }
       })
       .catch((err) => {
-        // No response -> offline. Use the last copy of this exact form we
-        // cached while online, if we have one, instead of failing outright.
+      
         if (!err.response) {
           const cached = getCachedForm(projectId, formType);
           if (cached) {
@@ -443,9 +473,6 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
     setAnswers((prev) => ({ ...prev, [fieldName]: value }));
 
     // Re-check format (email/phone) on every keystroke, so a wrong Gmail or
-    // a bad phone number shows its error immediately — not only after the
-    // user hits Submit. Don't nag about "required" here; that's for onBlur,
-    // otherwise every field would show a red error the instant it's touched.
     const resolvedType = TYPE_ALIASES[question?.type] || question?.type;
     const isEmpty = value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
     const formatError = isEmpty ? null : validateFieldFormat(resolvedType, value);
@@ -493,21 +520,23 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
       return;
     }
 
+    // If the form has a location question, save the (possibly manually
+    // corrected) pin as the entry's location instead of the raw device GPS.
+    const locQ = (form?.questions || []).find((q) => (TYPE_ALIASES[q.type] || q.type) === "location");
+    const picked = locQ ? String(answers[locQ.fieldName] || "").split(",").map((s) => parseFloat(s)) : [];
+    const finalLocation =
+      Number.isFinite(picked[0]) && Number.isFinite(picked[1])
+        ? { lat: picked[0], lon: picked[1] }
+        : location;
+
     setSubmitting(true);
     const payload = {
       project: projectId,
       formType,
       data: answers,
-      location: location || undefined,
+      location: finalLocation || undefined,
     };
 
-    // Check BEFORE attempting the request. This matters most when testing
-    // against a local/LAN backend (localhost or same WiFi router): toggling
-    // "internet" off does NOT disconnect you from that server, so the
-    // request would still go through — and if the session happened to be
-    // stale, it could come back as an unrelated 401 instead of a network
-    // failure, which is confusing. If the browser reports itself offline,
-    // don't even try the network — queue immediately.
     if (!navigator.onLine) {
       try {
         queueSubmission(payload);
@@ -515,8 +544,6 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
         onOffline && onOffline();
       } catch (err) {
         // queueSubmission throws if it couldn't actually persist the entry
-        // (e.g. localStorage quota exceeded by earlier photo-heavy entries).
-        // Surface this instead of leaving the button stuck on "Submitting...".
         setErrors({ _form: offlineSaveErrorMessage(err) });
       } finally {
         setSubmitting(false);
@@ -533,13 +560,6 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
         setErrors({ _form: res.data.message || 'Submission failed. Please try again.' });
       }
     } catch (error) {
-      // A response is only treated as a "real" error from OUR backend if it
-      // actually looks like our API's JSON shape ({ success, message }).
-      // Anything else — no response at all, a network error, a timeout, or
-      // an unrelated page (e.g. a mobile carrier's "no internet" / captive
-      // portal page, which still returns an HTTP response) — means the
-      // request never really reached the server, so treat it as offline
-      // and queue it instead of showing a scary error.
       const isRealApiError =
         error.response &&
         error.response.data &&
@@ -621,11 +641,7 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
         </span>
       </div>
 
-      {gpsStatus === "ok" && (
-        <div style={{ marginBottom: 20 }}>
-          <MapPicker lat={location.lat} lng={location.lon} readOnly height={200} />
-        </div>
-      )}
+      {/* Map is not added by default — it only appears through a "location" question */}
 
       {errors._form && (
         <div style={{ background: "#fdecea", color: "#c62828", padding: "10px 14px", borderRadius: 8, marginBottom: 16, fontSize: 13.5 }}>
@@ -650,6 +666,9 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
                 onChange={(fieldName, value) => handleChange(fieldName, value, q)}
                 onBlur={(fieldName, value) => handleBlur(fieldName, value, q)}
                 error={errors[q.fieldName]}
+                gps={location}
+                gpsStatus={gpsStatus}
+                onRetryGPS={fetchGPS}
               />
             </div>
           ))}

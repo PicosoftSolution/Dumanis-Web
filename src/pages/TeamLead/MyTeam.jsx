@@ -1,36 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Power, Search, Users, Shield } from 'lucide-react';
+import { Plus, Edit2, Power, Search, Users } from 'lucide-react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 
-export default function TeamMembers() {
+// Backend allows only ONE project per team member ("Already Exists" otherwise).
+// While that rule is on, ticking a project un-ticks the others.
+// If you later allow many projects per user in the backend, set this to true.
+const ALLOW_MULTIPLE_PROJECTS = false;
+
+const EMPTY_FORM = {
+  firstName: '',
+  lastName: '',
+  email: '',
+  password: '',
+  phone: '',
+  projectIds: []
+};
+
+// Team Lead: add / edit / activate-deactivate his own Team Members
+// and assign them to one of the Lead's projects.
+export default function MyTeam() {
   const { user } = useAuth();
-  // Super Admin can still add a Lead/Team Member directly if needed, but the
-  // day-to-day edit/deactivate controls belong to the Admin or Lead who
-  // actually owns that person's project.
-  const isSuperAdmin = user?.role === 'super_admin';
-  // Admin manages Leads from the separate "Team Leads" page, so this page
-  // shows ONLY team members for an Admin.
-  const isAdmin = user?.role === 'admin';
 
   const [showModal, setShowModal] = useState(false);
   const [editingMember, setEditingMember] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [roleFilter, setRoleFilter] = useState('all');
   const [loading, setLoading] = useState(false);
   const [members, setMembers] = useState([]);
-  const [projects, setProjects] = useState([]);
+  const [projects, setProjects] = useState([]); // only projects assigned to this Lead
   const [fetching, setFetching] = useState(true);
-  const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    password: '',
-    phone: '',
-    role: 'team_member',
-    assignedProjects: []
-  });
+  const [formData, setFormData] = useState(EMPTY_FORM);
 
   const fetchData = async () => {
     setFetching(true);
@@ -39,11 +39,13 @@ export default function TeamMembers() {
         api.get('/users'),
         api.get('/projects')
       ]);
-      const allUsers = usersRes.data.data || [];
-      setMembers(allUsers.filter(u => ['lead', 'team_member'].includes(u.role)));
+      const list = (usersRes.data.data || []).filter(
+        u => u._id !== user?._id && u.role === 'team_member'
+      );
+      setMembers(list);
       setProjects(projectsRes.data.data || []);
     } catch (error) {
-      toast.error('Failed to fetch data');
+      toast.error(error.response?.data?.message || 'Failed to load team');
     } finally {
       setFetching(false);
     }
@@ -53,12 +55,18 @@ export default function TeamMembers() {
     fetchData();
   }, []);
 
-  // For Admin: hide leads completely (they live in the Team Leads page)
-  const visibleMembers = isAdmin ? members.filter(m => m.role === 'team_member') : members;
+  const getProjectIds = (member) =>
+    (member?.assignedProjects || []).map(p => p._id || p);
 
-  const filteredMembers = visibleMembers
-    .filter(m => roleFilter === 'all' || m.role === roleFilter)
-    .filter(m => `${m.firstName} ${m.lastName} ${m.email}`.toLowerCase().includes(searchTerm.toLowerCase()));
+  const projectNames = (member) =>
+    (member.assignedProjects || [])
+      .map(p => p.name || projects.find(pr => pr._id === p)?.name)
+      .filter(Boolean)
+      .join(', ');
+
+  const filteredMembers = members.filter(m =>
+    `${m.firstName} ${m.lastName} ${m.email}`.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   const handleOpenModal = (member = null) => {
     if (member) {
@@ -69,31 +77,28 @@ export default function TeamMembers() {
         email: member.email,
         password: '',
         phone: member.phone || '',
-        role: member.role,
-        assignedProjects: (member.assignedProjects || []).map(p => p._id || p)
+        projectIds: getProjectIds(member)
       });
     } else {
       setEditingMember(null);
-      setFormData({
-        firstName: '',
-        lastName: '',
-        email: '',
-        password: '',
-        phone: '',
-        role: 'team_member',
-        assignedProjects: []
-      });
+      setFormData(EMPTY_FORM);
     }
     setShowModal(true);
   };
 
   const toggleProject = (projectId) => {
-    setFormData(prev => ({
-      ...prev,
-      assignedProjects: prev.assignedProjects.includes(projectId)
-        ? prev.assignedProjects.filter(id => id !== projectId)
-        : [...prev.assignedProjects, projectId]
-    }));
+    setFormData(prev => {
+      const selected = prev.projectIds.includes(projectId);
+      if (!ALLOW_MULTIPLE_PROJECTS) {
+        return { ...prev, projectIds: selected ? [] : [projectId] };
+      }
+      return {
+        ...prev,
+        projectIds: selected
+          ? prev.projectIds.filter(id => id !== projectId)
+          : [...prev.projectIds, projectId]
+      };
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -102,46 +107,75 @@ export default function TeamMembers() {
       toast.error('Please fill all required fields');
       return;
     }
-    if (!editingMember && !formData.password) {
-      toast.error('Password is required for new members');
+    if (!editingMember && formData.password.length < 6) {
+      toast.error('Password must be at least 6 characters');
       return;
     }
     setLoading(true);
     try {
+      let memberId = editingMember?._id;
+
       if (editingMember) {
         await api.put(`/users/${editingMember._id}`, {
           firstName: formData.firstName,
           lastName: formData.lastName,
           email: formData.email,
-          phone: formData.phone,
-          role: formData.role,
-          assignedProjects: formData.assignedProjects
+          phone: formData.phone
         });
-        toast.success('Team member updated successfully');
       } else {
-        await api.post('/users/create-team-member', {
+        const res = await api.post('/users/create-team-member', {
           firstName: formData.firstName,
           lastName: formData.lastName,
           email: formData.email,
           password: formData.password,
           phone: formData.phone,
-          roleName: formData.role,
-          assignedProjects: formData.assignedProjects
+          role: 'team_member' // a Lead can only create Team Members
         });
-        toast.success('Team member created successfully');
+        memberId = res.data.data._id;
+      }
+
+      // Backend ignores assignedProjects on create/update on purpose;
+      // projects are assigned through the dedicated assign endpoints.
+      const oldIds = editingMember ? getProjectIds(editingMember) : [];
+      const newIds = formData.projectIds;
+      const removed = oldIds.filter(id => !newIds.includes(id));
+      const added = newIds.filter(id => !oldIds.includes(id));
+      let projectError = null;
+
+      try {
+        // remove first so the "one project per user" rule doesn't block the new one
+        for (const projectId of removed) {
+          await api.delete(`/users/${memberId}/project/${projectId}`);
+        }
+        for (const projectId of added) {
+          await api.post('/users/assign-to-project', {
+            userIds: [memberId],
+            projectId
+          });
+        }
+      } catch (err) {
+        projectError = err.response?.data?.message || 'Project assignment failed';
+      }
+
+      if (projectError) {
+        toast.error(`Member saved, but project not assigned: ${projectError}`);
+      } else {
+        toast.success(editingMember ? 'Team member updated successfully' : 'Team member created successfully');
       }
       setShowModal(false);
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to save member');
+      toast.error(error.response?.data?.message || 'Failed to save team member');
     } finally {
       setLoading(false);
     }
   };
 
   const toggleStatus = async (member) => {
+    const action = member.isActive ? 'deactivate' : 'activate';
+    if (!window.confirm(`Do you want to ${action} ${member.firstName} ${member.lastName}?`)) return;
     try {
-      await api.patch(`/users/${member._id}/toggle-status`, { isActive: !member.isActive });
+      await api.patch(`/users/${member._id}/toggle-status`);
       toast.success(`Member ${!member.isActive ? 'activated' : 'deactivated'}`);
       fetchData();
     } catch (error) {
@@ -160,32 +194,19 @@ export default function TeamMembers() {
   return (
     <div className="p-4 sm:p-6 max-w-full overflow-x-hidden">
       <div className="mb-6">
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">
-          {isAdmin ? 'Team Members' : 'Team Management'}
-        </h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">My Team</h1>
         <p className="text-gray-500 mt-1 text-sm sm:text-base">
-          {isAdmin ? 'Manage team members' : 'Manage leads and team members'}
+          Add and manage your team members ({members.length} total)
         </p>
       </div>
 
-      {/* Search / filter / add bar */}
+      {/* Search / add bar */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
         <div className="flex flex-col sm:flex-row justify-between gap-3 sm:gap-4">
-          <div className="flex flex-col xs:flex-row gap-3 flex-1">
-            <div className="relative flex-1 min-w-0">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input type="text" placeholder="Search team members..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            {/* Role filter is pointless for Admin (only team members are shown) */}
-            {!isAdmin && (
-              <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}
-                className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-full xs:w-auto">
-                <option value="all">All Roles</option>
-                <option value="lead">Leads Only</option>
-                <option value="team_member">Team Members Only</option>
-              </select>
-            )}
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input type="text" placeholder="Search team members..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <button onClick={() => handleOpenModal()}
             className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg w-full sm:w-auto shrink-0">
@@ -202,8 +223,8 @@ export default function TeamMembers() {
           {filteredMembers.map((member) => (
             <div key={member._id} className="p-4 flex flex-col gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${member.role === 'lead' ? 'bg-blue-100' : 'bg-green-100'}`}>
-                  {member.role === 'lead' ? <Shield className="w-5 h-5 text-blue-600" /> : <Users className="w-5 h-5 text-green-600" />}
+                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-green-100">
+                  <Users className="w-5 h-5 text-green-600" />
                 </div>
                 <div className="min-w-0">
                   <p className="font-medium text-gray-900 truncate">{member.firstName} {member.lastName}</p>
@@ -211,30 +232,26 @@ export default function TeamMembers() {
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className={`px-2 py-1 text-xs rounded-full font-medium ${member.role === 'lead' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
-                  {member.role === 'lead' ? 'Lead' : 'Team Member'}
-                </span>
+                <span className="px-2 py-1 text-xs rounded-full font-medium bg-green-100 text-green-700">Team Member</span>
                 <span className={`px-2 py-1 text-xs rounded-full font-medium ${member.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                   {member.isActive ? 'Active' : 'Inactive'}
                 </span>
-                <span className="text-xs text-gray-500">{member.assignedProjects?.length || 0} project(s)</span>
+                <span className="text-xs text-gray-500">{projectNames(member) || 'No project'}</span>
               </div>
-              {isSuperAdmin ? (
-                <span className="text-xs text-gray-400 italic">Managed by their Admin/Lead</span>
-              ) : (
-                <div className="flex gap-2 pt-1">
-                  <button onClick={() => handleOpenModal(member)} className="flex-1 flex items-center justify-center gap-1.5 py-2 text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 rounded-lg">
-                    <Edit2 className="w-4 h-4" /> Edit
-                  </button>
-                  <button onClick={() => toggleStatus(member)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-sm rounded-lg border ${member.isActive ? 'text-red-600 border-red-200 hover:bg-red-50' : 'text-green-600 border-green-200 hover:bg-green-50'}`}>
-                    <Power className="w-4 h-4" /> {member.isActive ? 'Deactivate' : 'Activate'}
-                  </button>
-                </div>
-              )}
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => handleOpenModal(member)} className="flex-1 flex items-center justify-center gap-1.5 py-2 text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 rounded-lg">
+                  <Edit2 className="w-4 h-4" /> Edit
+                </button>
+                <button onClick={() => toggleStatus(member)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-sm rounded-lg border ${member.isActive ? 'text-red-600 border-red-200 hover:bg-red-50' : 'text-green-600 border-green-200 hover:bg-green-50'}`}>
+                  <Power className="w-4 h-4" /> {member.isActive ? 'Deactivate' : 'Activate'}
+                </button>
+              </div>
             </div>
           ))}
           {filteredMembers.length === 0 && (
-            <div className="px-4 py-12 text-center text-gray-500 text-sm">No team members found</div>
+            <div className="px-4 py-12 text-center text-gray-500 text-sm">
+              No team members yet. Click "Add Team Member" to create one.
+            </div>
           )}
         </div>
 
@@ -245,7 +262,7 @@ export default function TeamMembers() {
               <tr>
                 <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Member</th>
                 <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Role</th>
-                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Projects</th>
+                <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Project</th>
                 <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Status</th>
                 <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Actions</th>
               </tr>
@@ -255,8 +272,8 @@ export default function TeamMembers() {
                 <tr key={member._id} className="hover:bg-gray-50">
                   <td className="px-4 md:px-6 py-4">
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${member.role === 'lead' ? 'bg-blue-100' : 'bg-green-100'}`}>
-                        {member.role === 'lead' ? <Shield className="w-5 h-5 text-blue-600" /> : <Users className="w-5 h-5 text-green-600" />}
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-green-100">
+                        <Users className="w-5 h-5 text-green-600" />
                       </div>
                       <div className="min-w-0">
                         <p className="font-medium text-gray-900 truncate">{member.firstName} {member.lastName}</p>
@@ -265,36 +282,31 @@ export default function TeamMembers() {
                     </div>
                   </td>
                   <td className="px-4 md:px-6 py-4">
-                    <span className={`px-2 py-1 text-xs rounded-full font-medium whitespace-nowrap ${member.role === 'lead' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
-                      {member.role === 'lead' ? 'Lead' : 'Team Member'}
-                    </span>
+                    <span className="px-2 py-1 text-xs rounded-full font-medium whitespace-nowrap bg-green-100 text-green-700">Team Member</span>
                   </td>
-                  <td className="px-4 md:px-6 py-4 text-sm text-gray-600 whitespace-nowrap">{member.assignedProjects?.length || 0} project(s)</td>
+                  <td className="px-4 md:px-6 py-4 text-sm text-gray-600">{projectNames(member) || 'No project'}</td>
                   <td className="px-4 md:px-6 py-4">
                     <span className={`px-2 py-1 text-xs rounded-full font-medium whitespace-nowrap ${member.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                       {member.isActive ? 'Active' : 'Inactive'}
                     </span>
                   </td>
                   <td className="px-4 md:px-6 py-4">
-                    {isSuperAdmin ? (
-                      <span className="text-xs text-gray-400 italic">Managed by their Admin/Lead</span>
-                    ) : (
-                      <div className="flex gap-2">
-                        <button onClick={() => handleOpenModal(member)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => toggleStatus(member)} className={`p-2 rounded-lg ${member.isActive ? 'text-red-600 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'}`}>
-                          <Power className="w-4 h-4" />
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex gap-2">
+                      <button onClick={() => handleOpenModal(member)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg" title="Edit">
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => toggleStatus(member)} title={member.isActive ? 'Deactivate' : 'Activate'}
+                        className={`p-2 rounded-lg ${member.isActive ? 'text-red-600 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'}`}>
+                        <Power className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
               {filteredMembers.length === 0 && (
                 <tr>
                   <td colSpan="5" className="px-6 py-12 text-center text-gray-500">
-                    No team members found
+                    No team members yet. Click "Add Team Member" to create one.
                   </td>
                 </tr>
               )}
@@ -314,35 +326,33 @@ export default function TeamMembers() {
             <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4">
               <div className="grid grid-cols-1 xs:grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">First Name *</label>
-                  <input type="text" required value={formData.firstName} onChange={(e) => setFormData({...formData, firstName: e.target.value})}
+                  <input type="text" required value={formData.firstName} onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
                 </div>
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Last Name *</label>
-                  <input type="text" required value={formData.lastName} onChange={(e) => setFormData({...formData, lastName: e.target.value})}
+                  <input type="text" required value={formData.lastName} onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
                 </div>
               </div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
-                <input type="email" required value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})}
+                <input type="email" required value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
               </div>
               <div className="grid grid-cols-1 xs:grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                  <input type="tel" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                  <input type="tel" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
                 </div>
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                  <select value={formData.role} onChange={(e) => setFormData({...formData, role: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                  <select value="team_member" disabled
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600">
                     <option value="team_member">Team Member</option>
-                    {/* Admin creates Leads from the Team Leads page, so no Lead option here */}
-                    {!isAdmin && <option value="lead">Lead</option>}
                   </select>
                 </div>
               </div>
               {!editingMember && (
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Password *</label>
-                  <input type="password" required value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})}
+                  <input type="password" required minLength={6} value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
                 </div>
               )}
@@ -350,12 +360,18 @@ export default function TeamMembers() {
                 <div className="space-y-2 max-h-32 overflow-y-auto border border-gray-200 rounded-lg p-3">
                   {projects.map(project => (
                     <label key={project._id} className="flex items-center gap-3 cursor-pointer">
-                      <input type="checkbox" checked={formData.assignedProjects.includes(project._id)} onChange={() => toggleProject(project._id)}
+                      <input type="checkbox" checked={formData.projectIds.includes(project._id)} onChange={() => toggleProject(project._id)}
                         className="w-4 h-4 text-blue-600 rounded shrink-0" />
                       <span className="text-sm text-gray-700 break-words">{project.name}</span>
                     </label>
                   ))}
+                  {projects.length === 0 && (
+                    <p className="text-xs text-gray-400">No projects assigned to you yet. Ask your Admin to assign one.</p>
+                  )}
                 </div>
+                {!ALLOW_MULTIPLE_PROJECTS && (
+                  <p className="text-[11px] text-gray-400 mt-1">A team member can be assigned to only one project.</p>
+                )}
               </div>
               <div className="flex flex-col xs:flex-row gap-3 pt-4">
                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Power, Search, Folder, MapPin, Calendar, CheckCircle, XCircle, X, Users, ClipboardList, Navigation } from 'lucide-react';
+import { Plus, Edit2, Power, Search, Folder, MapPin, Calendar, CheckCircle, XCircle, X, Users, UserPlus, ClipboardList, Navigation } from 'lucide-react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
@@ -7,37 +7,40 @@ import MapPicker from '../../components/MapPicker';
 
 const FORM_TYPES = ['Residential', 'Commercial', 'Industrial', 'Institutional', 'Open Site', 'Apartment'];
 
+const EMPTY_FORM = {
+  name: '',
+  description: '',
+  startDate: '',
+  endDate: '',
+  enabledForms: [],
+  assignedAdminIds: [],
+  assignedUserIds: [],
+  location: { lat: '', lng: '', address: '' }
+};
+
 export default function Projects() {
   const { user } = useAuth();
   // Both Super Admin and Admin can create/edit/activate-deactivate projects.
-  // Admin only sees & manages the projects assigned to them (enforced server-side).
   const canManage = user?.role === 'super_admin' || user?.role === 'admin';
   // Only Super Admin can choose which Admin(s) a project is assigned to.
   const isSuperAdmin = user?.role === 'super_admin';
+  // Only Admin assigns Team Members to projects (Super Admin does not).
+  const isAdmin = user?.role === 'admin';
   const [showModal, setShowModal] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [projects, setProjects] = useState([]);
   const [admins, setAdmins] = useState([]);
+  const [teamMembers, setTeamMembers] = useState([]);
   const [fetching, setFetching] = useState(true);
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    startDate: '',
-    endDate: '',
-    enabledForms: [],
-    assignedAdminIds: [],
-    location: { lat: '', lng: '', address: '' }
-  });
+  const [formData, setFormData] = useState(EMPTY_FORM);
 
   // Fetch projects from API
   const fetchProjects = async () => {
     setFetching(true);
     try {
       const response = await api.get('/projects');
-      console.log('Projects API Response:', response.data);
-
       if (response.data.success) {
         setProjects(response.data.data || []);
       } else {
@@ -51,7 +54,7 @@ export default function Projects() {
     }
   };
 
-  // Fetch existing Admins so Super Admin can assign this project to one or more of them.
+  // Admins list (Super Admin only)
   const fetchAdmins = async () => {
     if (!isSuperAdmin) return;
     try {
@@ -59,6 +62,22 @@ export default function Projects() {
       setAdmins(response.data.data || []);
     } catch (error) {
       console.error('Error fetching admins:', error);
+    }
+  };
+
+  // Team members / leads who are NOT in any project yet
+  // (+ members already in this project when editing).
+  // Admin sees only their own team, Super Admin sees everyone.
+  const fetchAssignableUsers = async (projectId) => {
+    if (!isAdmin) return;
+    try {
+      const response = await api.get('/projects/assignable-users', {
+        params: projectId ? { projectId } : {}
+      });
+      setTeamMembers(response.data.data || []);
+    } catch (error) {
+      console.error('Error fetching team members:', error);
+      toast.error('Failed to load team members');
     }
   };
 
@@ -81,19 +100,14 @@ export default function Projects() {
         endDate: project.endDate?.split('T')[0] || '',
         enabledForms: project.enabledForms || [],
         assignedAdminIds: (project.assignedAdmins || []).map(a => a._id || a),
+        assignedUserIds: (project.assignedUsers || []).map(u => u._id || u),
         location: project.location || { lat: '', lng: '', address: '' }
       });
+      fetchAssignableUsers(project._id);
     } else {
       setEditingProject(null);
-      setFormData({
-        name: '',
-        description: '',
-        startDate: '',
-        endDate: '',
-        enabledForms: [],
-        assignedAdminIds: [],
-        location: { lat: '', lng: '', address: '' }
-      });
+      setFormData(EMPTY_FORM);
+      fetchAssignableUsers();
     }
     setShowModal(true);
   };
@@ -104,6 +118,30 @@ export default function Projects() {
       assignedAdminIds: prev.assignedAdminIds.includes(adminId)
         ? prev.assignedAdminIds.filter(id => id !== adminId)
         : [...prev.assignedAdminIds, adminId]
+    }));
+  };
+
+  // The project (other than the one being edited) this member already belongs to
+  const getOtherProject = (member) =>
+    (member.assignedProjects || []).find(p => (p._id || p) !== editingProject?._id);
+
+  const toggleMember = (member) => {
+    const memberId = member._id;
+
+    // Already in another project -> "Already Exists"
+    const otherProject = getOtherProject(member);
+    if (otherProject) {
+      toast.error(
+        `Already Exists: ${member.firstName} ${member.lastName} (${member.email}) is already assigned to "${otherProject.name || 'another project'}"`
+      );
+      return;
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      assignedUserIds: prev.assignedUserIds.includes(memberId)
+        ? prev.assignedUserIds.filter(id => id !== memberId)
+        : [...prev.assignedUserIds, memberId]
     }));
   };
 
@@ -123,7 +161,6 @@ export default function Projects() {
           const lat = position.coords.latitude;
           const lng = position.coords.longitude;
 
-          // Try to get address from coordinates
           try {
             const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
             const data = await response.json();
@@ -140,7 +177,7 @@ export default function Projects() {
             toast.success('Location coordinates captured');
           }
         },
-        (error) => {
+        () => {
           toast.error('Unable to get location. Please check permissions.');
         }
       );
@@ -149,10 +186,6 @@ export default function Projects() {
     }
   };
 
-  // Called by MapPicker whenever the pin moves — via search select, click, or drag.
-  // - If `address` is already known (search result was picked), use it directly.
-  // - Otherwise (map click / marker drag), set the coordinates immediately and
-  //   reverse-geocode in the background to fill in the place name.
   const handleMapChange = async (la, ln, address) => {
     if (address) {
       setFormData(prev => ({
@@ -175,7 +208,6 @@ export default function Projects() {
         location: { ...prev.location, address: data.display_name || prev.location.address }
       }));
     } catch (error) {
-      // Reverse geocoding failed — coordinates are already saved, just no name this time.
       console.error('Reverse geocoding failed:', error);
     }
   };
@@ -200,10 +232,17 @@ export default function Projects() {
         toast.success('Project created successfully');
       }
       setShowModal(false);
-      fetchProjects(); // Refresh the list
+      fetchProjects();
     } catch (error) {
       console.error('Error saving project:', error);
-      toast.error(error.response?.data?.message || 'Failed to save project');
+      // 409 = a selected team member is already in another project
+      if (error.response?.status === 409) {
+        const names = (error.response.data.alreadyAssigned || []).map(u => u.name || u.email).join(', ');
+        toast.error(`Already Exists${names ? ': ' + names : ''}`);
+        fetchAssignableUsers(editingProject?._id); // refresh the list
+      } else {
+        toast.error(error.response?.data?.message || 'Failed to save project');
+      }
     } finally {
       setLoading(false);
     }
@@ -231,7 +270,7 @@ export default function Projects() {
     <div className="p-6">
       <div className="mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{isSuperAdmin ? 'Project Management' : canManage ? 'My Projects' : 'My Projects'}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{isSuperAdmin ? 'Project Management' : 'My Projects'}</h1>
           <p className="text-gray-500 mt-1 text-sm">
             {isSuperAdmin
               ? `Create and manage all projects (${projects.length} total)`
@@ -333,6 +372,23 @@ export default function Projects() {
                   </div>
                 )}
 
+                {isAdmin && (
+                  <div className="mb-4">
+                    <p className="text-xs text-gray-500 mb-2">Team Members ({project.assignedUsers?.length || 0}):</p>
+                    <div className="flex flex-wrap gap-2">
+                      {project.assignedUsers?.length > 0 ? (
+                        project.assignedUsers.map(member => (
+                          <span key={member._id} className="px-2 py-1 bg-green-50 text-green-700 text-xs rounded-full">
+                            {member.firstName} {member.lastName}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-gray-400 text-sm">No team members assigned</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="mb-4">
                   <p className="text-xs text-gray-500 mb-2">Enabled Forms:</p>
                   <div className="flex flex-wrap gap-2">
@@ -361,7 +417,7 @@ export default function Projects() {
         </div>
       )}
 
-      {/* Create/Edit Project Modal — redesigned: wider, sectioned, sticky header/footer, compact chip selectors */}
+      {/* Create/Edit Project Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-3xl shadow-2xl max-h-[92vh] flex flex-col">
@@ -481,7 +537,7 @@ export default function Projects() {
                   </div>
                 </div>
 
-                {/* Assign Admins */}
+                {/* Assign Admins (Super Admin only) */}
                 {isSuperAdmin && (
                   <div className="pt-1 border-t border-gray-100">
                     <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 mt-4 mb-1">
@@ -510,6 +566,52 @@ export default function Projects() {
                               title={admin.email}
                             >
                               {admin.firstName} {admin.lastName}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Assign Team Members (Admin only) */}
+                {isAdmin && (
+                  <div className="pt-1 border-t border-gray-100">
+                    <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 mt-4 mb-1">
+                      <UserPlus className="w-3.5 h-3.5 text-gray-400" />
+                      Assign Team Members
+                      <span className="text-gray-400 font-normal">({formData.assignedUserIds.length} selected)</span>
+                    </label>
+                    {teamMembers.length === 0 ? (
+                      <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2.5">
+                        No team members found. Add team members first, then assign them to a project here.
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {teamMembers.map(member => {
+                          const checked = formData.assignedUserIds.includes(member._id);
+                          const otherProject = getOtherProject(member);
+                          return (
+                            <button
+                              type="button"
+                              key={member._id}
+                              onClick={() => toggleMember(member)}
+                              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                                otherProject
+                                  ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
+                                  : checked
+                                    ? 'bg-green-600 border-green-600 text-white'
+                                    : 'bg-white border-gray-200 text-gray-600 hover:border-green-300'
+                              }`}
+                              title={otherProject ? `${member.email} - already in "${otherProject.name}"` : member.email}
+                            >
+                              {member.firstName} {member.lastName}
+                              {member.role === 'lead' && <span className="ml-1 opacity-75">(Lead)</span>}
+                              {otherProject && (
+                                <span className="ml-1.5 text-[10px] text-amber-600">
+                                  · In: {otherProject.name}
+                                </span>
+                              )}
                             </button>
                           );
                         })}

@@ -53,12 +53,6 @@ export default function Dashboard({ user }) {
           </h1>
           <p className="text-gray-500 mt-1">Here's your activity summary.</p>
         </div>
-        <a
-          href="/entry"
-          className="px-5 py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-xl text-sm font-semibold shadow-sm transition-colors"
-        >
-          + New Entry
-        </a>
       </div>
 
       {/* Stats Grid */}

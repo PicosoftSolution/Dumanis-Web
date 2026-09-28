@@ -9,6 +9,7 @@ import Reports from '../SuperAdmin/Reports';
 import Forms from '../SuperAdmin/Forms';
 import DynamicFormBuilder from '../SuperAdmin/DynamicFormBuilder';
 import FormResponsesViewer from '../SuperAdmin/FormResponsesViewer';
+import TeamLeads from './Teamleads'; // NEW: change path if your TeamLeads.jsx is in another folder
 import api from '../../api/axios';
 
 // Admin Portal — same shell/pages as the Super Admin portal, but every API
@@ -73,6 +74,8 @@ export default function AdminPortal() {
         return <DynamicFormBuilder />;
       case 'form-responses':
         return <FormResponsesViewer />;
+      case 'team-leads': // NEW
+        return <TeamLeads />;
       case 'team':
         return <TeamMembers users={users} projects={projects} onRefresh={fetchAllData} />;
       case 'entries':

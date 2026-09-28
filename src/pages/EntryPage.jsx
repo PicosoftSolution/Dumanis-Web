@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Folder, MapPin, ChevronLeft, ClipboardList, WifiOff, RefreshCw } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Folder, MapPin, ChevronLeft, ClipboardList, WifiOff, RefreshCw, Home } from 'lucide-react';
 import api from '../api/axios';
 import toast from 'react-hot-toast';
 import SurveyForm from './SuperAdmin/SurveyForm';
@@ -12,6 +13,7 @@ import {
 } from '../utils/offlineSync';
 
 const FORM_TYPES = ['Residential', 'Commercial', 'Industrial', 'Institutional', 'Open Site', 'Apartment'];
+const DASHBOARD_PATH = '/dashboard'; // change if your home/dashboard route is different
 
 function StepDot({ active, done, label }) {
   return (
@@ -31,6 +33,7 @@ function StepDot({ active, done, label }) {
 // right per the permissions matrix. Pick one of your assigned projects,
 // pick a form type, and fill in whatever dynamic survey was built for it.
 export default function EntryPage() {
+  const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedProject, setSelectedProject] = useState('');
@@ -160,9 +163,17 @@ export default function EntryPage() {
       <div className="max-w-2xl mx-auto px-4 py-8">
         {/* Header + steps */}
         <div className="mb-8">
-          <div className="flex items-center gap-2 text-blue-600 mb-2">
-            <ClipboardList className="w-5 h-5" />
-            <span className="text-xs font-bold uppercase tracking-wide">Field Entry</span>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2 text-blue-600">
+              <ClipboardList className="w-5 h-5" />
+              <span className="text-xs font-bold uppercase tracking-wide">Field Entry</span>
+            </div>
+            <button
+              onClick={() => navigate(DASHBOARD_PATH)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:border-blue-300 hover:text-blue-700 transition-colors"
+            >
+              <Home className="w-4 h-4" /> Dashboard
+            </button>
           </div>
           <h1 className="text-2xl font-bold text-gray-900">New Entry</h1>
           <p className="text-gray-500 text-sm mt-1">Select a project and a form type to start a field survey.</p>
