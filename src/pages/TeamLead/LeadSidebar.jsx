@@ -24,7 +24,7 @@ const NAV_ITEMS = [
 
 export default function LeadSidebar({ active, onChange, user, onLogout }) {
   return (
-    <div className="w-64 bg-gradient-to-b from-blue-900 to-blue-800 min-h-screen sticky top-0 flex flex-col shadow-xl">
+    <div className="w-64 max-w-full h-dvh md:h-full md:min-h-dvh bg-gradient-to-b from-blue-900 to-blue-800 flex flex-col shadow-xl">  
       <div className="p-6 border-b border-blue-700/50">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-lg p-1.5">

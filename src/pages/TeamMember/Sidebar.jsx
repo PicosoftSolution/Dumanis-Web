@@ -17,7 +17,7 @@ const NAV_ITEMS = [
 
 export default function Sidebar({ active, onChange, user, onLogout }) {
   return (
-    <div className="w-64 bg-gradient-to-b from-indigo-900 to-indigo-800 min-h-screen sticky top-0 flex flex-col shadow-xl">
+    <div className="w-64 max-w-full h-dvh md:h-full md:min-h-dvh bg-gradient-to-b from-blue-900 to-blue-800 flex flex-col shadow-xl">  
        {/* Logo Section — same styling as the Admin & Super Admin portals */}
       <div className="p-6 border-b border-indigo-700/50">
         <div className="flex items-center gap-3">
