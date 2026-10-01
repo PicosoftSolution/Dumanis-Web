@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, MapPin, Pencil, FileText, Search } from 'lucide-react';
+import { Calendar, MapPin, Pencil, FileText, Search, Download } from 'lucide-react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import EditSubmissionModal from '../../components/EditSubmissionModal';
@@ -21,10 +21,18 @@ function startOfDay(d) {
   date.setHours(0, 0, 0, 0);
   return date;
 }
+// Local date -> "YYYY-MM-DD" (avoids the UTC shift of toISOString)
+function toYMD(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 export default function MyEntries() {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [period, setPeriod] = useState('week');
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState(null);
@@ -56,14 +64,55 @@ export default function MyEntries() {
       });
   }, [submissions, period, search]);
 
+  // Export MY entries to Excel (one sheet per form type, question labels as columns).
+  // The selected period (Today / This Week / All) decides the date range.
+  // The server only ever returns the logged-in user's own entries.
+  const exportMyEntries = async () => {
+    setExporting(true);
+    try {
+      const now = new Date();
+      const params = {};
+      if (period === 'day') {
+        params.from = toYMD(now);
+        params.to = toYMD(now);
+      } else if (period === 'week') {
+        params.from = toYMD(startOfWeek(now));
+        params.to = toYMD(now);
+      }
+
+      const response = await api.get('/export/my-excel', {
+        params,
+        responseType: 'blob', // binary file, not JSON
+      });
+
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `my_entries_${period}_${toYMD(now)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('Entries exported successfully');
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error('Failed to export entries');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="mb-6 flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">My Entries</h1>
           <p className="text-gray-500 mt-1 text-sm">Review and edit the entries you've submitted.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap items-center">
           {PERIODS.map((p) => (
             <button
               key={p.key}
@@ -74,6 +123,14 @@ export default function MyEntries() {
               {p.label}
             </button>
           ))}
+          <button
+            onClick={exportMyEntries}
+            disabled={exporting}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+          >
+            <Download className="w-4 h-4" />
+            {exporting ? 'Exporting...' : 'Export'}
+          </button>
         </div>
       </div>
 

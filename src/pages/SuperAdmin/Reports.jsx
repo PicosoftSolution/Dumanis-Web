@@ -10,6 +10,7 @@ export default function Reports() {
   const [users, setUsers] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
 
   const fetchReportData = async () => {
@@ -37,34 +38,37 @@ export default function Reports() {
     fetchReportData();
   }, []);
 
+  // Downloads ONE Excel file: a separate sheet for every Project + Form,
+  // question labels as column headers, one row per submission.
   const exportReport = async () => {
+    setExporting(true);
     try {
-      const response = await api.get('/reports/export', {
-        params: { startDate: dateRange.start, endDate: dateRange.end }
+      const response = await api.get('/export/excel-all', {
+        params: {
+          from: dateRange.start || undefined,
+          to: dateRange.end || undefined,
+        },
+        responseType: 'blob', // binary file, not JSON
       });
-      const csvData = response.data.data;
-      const csvContent = convertToCSV(csvData);
-      const blob = new Blob([csvContent], { type: 'text/csv' });
+
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `report_${new Date().toISOString()}.csv`;
+      a.download = `survey_report_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
       a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
       toast.success('Report exported successfully');
     } catch (error) {
+      console.error('Export error:', error);
       toast.error('Failed to export report');
+    } finally {
+      setExporting(false);
     }
-  };
-
-  const convertToCSV = (data) => {
-    if (!data.length) return '';
-    const headers = Object.keys(data[0]);
-    const csvRows = [headers.join(',')];
-    for (const row of data) {
-      const values = headers.map(header => JSON.stringify(row[header] || ''));
-      csvRows.push(values.join(','));
-    }
-    return csvRows.join('\n');
   };
 
   const activeUsers = users?.filter(u => u.isActive).length || 0;
@@ -127,10 +131,11 @@ export default function Reports() {
             </div>
             <button
               onClick={exportReport}
-              className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors w-full sm:w-auto"
+              disabled={exporting}
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg transition-colors w-full sm:w-auto"
             >
               <Download className="w-4 h-4" />
-              <span>Export</span>
+              <span>{exporting ? 'Exporting...' : 'Export'}</span>
             </button>
           </div>
         </div>
