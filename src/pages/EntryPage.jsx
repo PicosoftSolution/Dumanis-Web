@@ -12,22 +12,7 @@ import {
   preloadAllForms,
 } from '../utils/offlineSync';
 
-const FORM_TYPES = ['Residential', 'Commercial', 'Industrial', 'Institutional', 'Open Site', 'Apartment'];
 const DASHBOARD_PATH = '/dashboard'; // change if your home/dashboard route is different
-
-function StepDot({ active, done, label }) {
-  return (
-    <div className="flex items-center gap-2">
-      <div
-        className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0
-        ${done ? 'bg-blue-600 text-white' : active ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'}`}
-      >
-        {done ? '✓' : ''}
-      </div>
-      <span className={`text-xs font-medium ${active || done ? 'text-gray-900' : 'text-gray-400'}`}>{label}</span>
-    </div>
-  );
-}
 
 // "Entry" — every role (Team Member, Lead, Admin, Super Admin) has this
 // right per the permissions matrix. Pick one of your assigned projects,
@@ -57,10 +42,7 @@ export default function EntryPage() {
 
   useEffect(() => {
     // If the browser itself reports offline, don't even attempt the
-    // request — go straight to whatever was cached last time. (A local/LAN
-    // dev backend can stay reachable even with "internet" toggled off,
-    // which could otherwise surface an unrelated error instead of the
-    // offline fallback.)
+    // request — go straight to whatever was cached last time.
     if (!navigator.onLine) {
       const cached = getCachedProjects();
       if (cached.length > 0) {
@@ -79,16 +61,17 @@ export default function EntryPage() {
         setProjects(active);
         cacheProjects(active); // keep a local copy for the next time we're offline
 
-        // Quietly fetch + cache EVERY project's EVERY enabled form type in
-        // the background, so any project/form combination the user picks
-        // later — even one they've never opened before — already works
-        // offline. No loading state; failures for individual forms are
-        // skipped and retried on the next successful online load.
-        preloadAllForms(api, active, FORM_TYPES);
+        // Quietly fetch + cache every project's enabled form types in the
+        // background so any project/form combination works offline later.
+        // Only preload the form types each project actually has enabled, so we
+        // don't request forms that don't exist (those return 400 Bad Request).
+        active.forEach((proj) => {
+          if (!proj.enabledForms?.length) return; // nothing enabled -> nothing to preload
+          preloadAllForms(api, [proj], proj.enabledForms);
+        });
       })
       .catch((err) => {
-        // No response at all -> we're offline; fall back to whatever was
-        // cached the last time this loaded successfully.
+        // No response at all -> we're offline; fall back to cached projects.
         if (!err.response) {
           const cached = getCachedProjects();
           if (cached.length > 0) {
@@ -161,7 +144,7 @@ export default function EntryPage() {
       )}
 
       <div className="max-w-2xl mx-auto px-4 py-8">
-        {/* Header + steps */}
+        {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between gap-2 mb-2">
             <div className="flex items-center gap-2 text-blue-600">
@@ -177,14 +160,6 @@ export default function EntryPage() {
           </div>
           <h1 className="text-2xl font-bold text-gray-900">New Entry</h1>
           <p className="text-gray-500 text-sm mt-1">Select a project and a form type to start a field survey.</p>
-
-          <div className="flex items-center gap-4 mt-5 bg-white border border-gray-100 rounded-xl px-4 py-3 shadow-sm">
-            <StepDot label="Project" active={step === 1} done={step > 1} />
-            <div className="flex-1 h-px bg-gray-200" />
-            <StepDot label="Form Type" active={step === 2} done={step > 2} />
-            <div className="flex-1 h-px bg-gray-200" />
-            <StepDot label="Fill & Submit" active={step === 3} done={false} />
-          </div>
         </div>
 
         {/* Step 1: pick project */}
@@ -220,11 +195,11 @@ export default function EntryPage() {
                       <p className="font-semibold text-gray-900 truncate">{p.name}</p>
                       {p.location?.address && (
                         <div className="flex items-start gap-1 mt-0.5">
-  <MapPin className="w-3 h-3 shrink-0 text-gray-500 mt-0.5" />
-  <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">
-    {p.location.address}
-  </p>
-</div>
+                          <MapPin className="w-3 h-3 shrink-0 text-gray-500 mt-0.5" />
+                          <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">
+                            {p.location.address}
+                          </p>
+                        </div>
                       )}
                     </div>
                   </button>
@@ -243,18 +218,27 @@ export default function EntryPage() {
             >
               <ChevronLeft className="w-4 h-4" /> {activeProject?.name}
             </button>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {(activeProject?.enabledForms?.length ? activeProject.enabledForms : FORM_TYPES).map((ft) => (
-                <button
-                  key={ft}
-                  onClick={() => setSelectedFormType(ft)}
-                  className="p-5 bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all text-center"
-                >
-                  <ClipboardList className="w-6 h-6 text-blue-600 mx-auto mb-2" />
-                  <span className="text-sm font-semibold text-gray-800">{ft}</span>
-                </button>
-              ))}
-            </div>
+            {activeProject?.enabledForms?.length ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {activeProject.enabledForms.map((ft) => (
+                  <button
+                    key={ft}
+                    onClick={() => setSelectedFormType(ft)}
+                    className="p-5 bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all text-center"
+                  >
+                    <ClipboardList className="w-6 h-6 text-blue-600 mx-auto mb-2" />
+                    <span className="text-sm font-semibold text-gray-800">{ft}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-14 bg-white rounded-2xl border border-gray-100">
+                <ClipboardList className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                <p className="text-gray-500 text-sm">
+                  No forms are enabled for this project yet.<br />Ask your Super Admin or Admin to enable one.
+                </p>
+              </div>
+            )}
           </div>
         )}
 

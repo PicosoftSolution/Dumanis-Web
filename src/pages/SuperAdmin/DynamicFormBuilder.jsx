@@ -55,7 +55,6 @@ function QuestionRow({ fq, index, onToggleVisible, onToggleMandatory, onMoveUp, 
       <span style={{ fontSize: 11, color: "#888", background: "#f0f4ff", padding: "2px 6px", borderRadius: 4 }}>
         {q.type}
       </span>
-      <span style={{ fontSize: 11, color: "#666" }}>{q.formType}</span>
 
       <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
         <input type="checkbox" checked={fq.isVisible} onChange={() => onToggleVisible(index)} />
@@ -97,6 +96,7 @@ const QUESTION_TYPES = [
   "switch",     // yes/no toggle
   "textarea",   // multi-line text
   "location", 
+  "number"
 ];
 
 const needsOptionsFor = (type) => ["select", "radio", "checkbox"].includes(type);
@@ -111,7 +111,7 @@ const textToOptions = (text) =>
 
 // ── Main DynamicFormBuilder ───────────────────────────────────
 export default function DynamicFormBuilder() {
-  const FORM_TYPES = ["Residential", "Commercial", "Institutional", "Apartment", "Open Site"];
+  const FORM_TYPES = ["Residential", "Commercial", "Industrial", "Institutional", "Apartment", "Open Site"];
 
   const [projects, setProjects] = useState([]);
   const [allQuestions, setAllQuestions] = useState([]);
@@ -369,13 +369,16 @@ export default function DynamicFormBuilder() {
             <option key={p._id} value={p._id}>{p.name}</option>
           ))}
         </select>
-        <select
-          value={selectedFormType}
-          onChange={(e) => setSelectedFormType(e.target.value)}
-          style={inputStyle}
-        >
-          {FORM_TYPES.map((ft) => <option key={ft}>{ft}</option>)}
-        </select>
+        {/* Form type dropdown only appears once a project is selected */}
+        {selectedProject && (
+          <select
+            value={selectedFormType}
+            onChange={(e) => setSelectedFormType(e.target.value)}
+            style={inputStyle}
+          >
+            {FORM_TYPES.map((ft) => <option key={ft}>{ft}</option>)}
+          </select>
+        )}
       </div>
 
       {selectedProject && (
@@ -400,7 +403,6 @@ export default function DynamicFormBuilder() {
             <div>
               <h4 style={{ marginBottom: 10 }}>
                 Form Questions ({formQuestions.length})
-                {existingForm && <span style={{ color: "#1a73e8", fontSize: 12, marginLeft: 8 }}>✓ Existing form loaded</span>}
               </h4>
               {formQuestions.length === 0 && (
                 <p style={{ color: "#999", fontStyle: "italic" }}>No questions added yet. Add them from the panel on the right.</p>

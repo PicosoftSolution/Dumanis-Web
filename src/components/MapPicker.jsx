@@ -30,7 +30,7 @@ function ClickToPlace({ onPick }) {
   return null;
 }
 
-// Search result select 
+// Search result select
 function FlyTo({ target }) {
   const map = useMap();
   useEffect(() => {
@@ -38,6 +38,35 @@ function FlyTo({ target }) {
   }, [target, map]);
   return null;
 }
+
+// Leaflet needs to recalculate its size when the container changes
+// (entering / leaving fullscreen), otherwise tiles look cut off or grey.
+function ResizeFix({ trigger }) {
+  const map = useMap();
+  useEffect(() => {
+    const t = setTimeout(() => map.invalidateSize(), 150);
+    return () => clearTimeout(t);
+  }, [trigger, map]);
+  return null;
+}
+
+const MaximizeIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="15 3 21 3 21 9" />
+    <polyline points="9 21 3 21 3 15" />
+    <line x1="21" y1="3" x2="14" y2="10" />
+    <line x1="3" y1="21" x2="10" y2="14" />
+  </svg>
+);
+
+const MinimizeIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="4 14 10 14 10 20" />
+    <polyline points="20 10 14 10 14 4" />
+    <line x1="14" y1="10" x2="21" y2="3" />
+    <line x1="3" y1="21" x2="10" y2="14" />
+  </svg>
+);
 
 export default function MapPicker({ lat, lng, onChange, height = 260, readOnly = false }) {
   const [view, setView] = useState('satellite');
@@ -47,6 +76,7 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
   const [searching, setSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [flyTarget, setFlyTarget] = useState(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const debounceRef = useRef(null);
 
   useEffect(() => {
@@ -60,7 +90,22 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
     };
   }, []);
 
-  // Type debounce  Nominatim search call 
+  // While fullscreen: lock page scroll and let Esc close it
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => {
+      if (e.key === 'Escape') setIsFullscreen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [isFullscreen]);
+
+  // Type debounce  Nominatim search call
   useEffect(() => {
     if (readOnly) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -100,15 +145,27 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
 
   const layer = TILE_LAYERS[view];
 
+  const wrapperStyle = isFullscreen
+    ? {
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        background: '#fff',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }
+    : { borderRadius: 10, overflow: 'hidden', border: '1px solid #ddd' };
+
   return (
-    <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #ddd' }}>
-      <div style={{ display: 'flex', borderBottom: '1px solid #ddd' }}>
+    <div style={wrapperStyle}>
+      <div style={{ display: 'flex', borderBottom: '1px solid #ddd', flexShrink: 0 }}>
         <button type="button" onClick={() => setView('map')} style={{ flex: 1, padding: '8px 0', fontSize: 13, fontWeight: 600, cursor: 'pointer', border: 'none', background: view === 'map' ? '#1a73e8' : '#f5f5f5', color: view === 'map' ? '#fff' : '#444' }}>Map</button>
         <button type="button" onClick={() => setView('satellite')} style={{ flex: 1, padding: '8px 0', fontSize: 13, fontWeight: 600, cursor: 'pointer', border: 'none', background: view === 'satellite' ? '#1a73e8' : '#f5f5f5', color: view === 'satellite' ? '#fff' : '#444' }}>Satellite</button>
       </div>
 
       {!readOnly && (
-        <div style={{ position: 'relative', padding: 8, borderBottom: '1px solid #eee', background: '#fff' }}>
+        <div style={{ position: 'relative', padding: 8, borderBottom: '1px solid #eee', background: '#fff', flexShrink: 0 }}>
           <input
             type="text"
             value={query}
@@ -137,40 +194,78 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
         </div>
       )}
 
-      <MapContainer
-        key={view}
-        center={position}
-        zoom={hasPosition ? 17 : 12}
-        style={{ height, width: '100%' }}
-        scrollWheelZoom={!readOnly}
+      {/* Map area: zoom +/- (top-left) and fullscreen toggle (top-right) */}
+      <div
+        style={{
+          position: 'relative',
+          width: '100%',
+          ...(isFullscreen ? { flex: 1, minHeight: 0 } : { height }),
+        }}
       >
-        <TileLayer url={layer.url} attribution={layer.attribution} />
-        <FlyTo target={flyTarget} />
-        {hasPosition && (
-          <Marker
-            position={position}
-            draggable={!readOnly}
-            eventHandlers={
-              readOnly
-                ? undefined
-                : {
-                    dragend: (e) => {
-                      const p = e.target.getLatLng();
-                      onChange && onChange(p.lat, p.lng);
-                    },
-                  }
-            }
-          />
-        )}
-        {!readOnly && <ClickToPlace onPick={(la, ln) => onChange && onChange(la, ln)} />}
-      </MapContainer>
+        <MapContainer
+          key={view}
+          center={position}
+          zoom={hasPosition ? 17 : 12}
+          zoomControl={true}
+          style={{ height: '100%', width: '100%' }}
+          scrollWheelZoom={!readOnly}
+        >
+          <TileLayer url={layer.url} attribution={layer.attribution} />
+          <FlyTo target={flyTarget} />
+          <ResizeFix trigger={isFullscreen} />
+          {hasPosition && (
+            <Marker
+              position={position}
+              draggable={!readOnly}
+              eventHandlers={
+                readOnly
+                  ? undefined
+                  : {
+                      dragend: (e) => {
+                        const p = e.target.getLatLng();
+                        onChange && onChange(p.lat, p.lng);
+                      },
+                    }
+              }
+            />
+          )}
+          {!readOnly && <ClickToPlace onPick={(la, ln) => onChange && onChange(la, ln)} />}
+        </MapContainer>
+
+        <button
+          type="button"
+          onClick={() => setIsFullscreen((v) => !v)}
+          title={isFullscreen ? 'Exit full screen' : 'Full screen'}
+          aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 10,
+            zIndex: 1000,
+            width: 34,
+            height: 34,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#fff',
+            color: '#333',
+            border: '2px solid rgba(0,0,0,0.2)',
+            borderRadius: 4,
+            cursor: 'pointer',
+            padding: 0,
+          }}
+        >
+          {isFullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
+        </button>
+      </div>
+
       {!isOnline && (
-        <p style={{ fontSize: 11, color: '#e65100', padding: '6px 10px', margin: 0, background: '#fff3e0', borderTop: '1px solid #ffe0b2' }}>
+        <p style={{ fontSize: 11, color: '#e65100', padding: '6px 10px', margin: 0, background: '#fff3e0', borderTop: '1px solid #ffe0b2', flexShrink: 0 }}>
           📴 Offline — map imagery may not load, but your GPS coordinates are still captured and will sync when you're back online.
         </p>
       )}
       {!readOnly && (
-        <p style={{ fontSize: 11, color: '#888', padding: '6px 10px', margin: 0, background: '#fafafa' }}>
+        <p style={{ fontSize: 11, color: '#888', padding: '6px 10px', margin: 0, background: '#fafafa', flexShrink: 0 }}>
           Tap the map to drop a pin or search above, or drag the marker to fine-tune it.
         </p>
       )}
