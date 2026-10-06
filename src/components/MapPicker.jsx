@@ -50,6 +50,33 @@ function ResizeFix({ trigger }) {
   return null;
 }
 
+// Keeps the pin in view. The map's `center` prop is only read once on mount,
+// so when the device GPS arrives AFTER the map has rendered (or the user taps
+// "Use my current GPS"), the pin used to be placed far outside the visible
+// area. This focuses the map on the first real position, and afterwards pans
+// only if the pin ends up off-screen (so dragging/tapping isn't disturbed).
+function FollowPosition({ position }) {
+  const map = useMap();
+  const firstFocus = useRef(true);
+  const la = position ? position[0] : null;
+  const ln = position ? position[1] : null;
+
+  useEffect(() => {
+    if (la === null || ln === null) return;
+    const pos = [la, ln];
+    if (firstFocus.current) {
+      firstFocus.current = false;
+      map.setView(pos, Math.max(map.getZoom(), 17));
+      return;
+    }
+    if (!map.getBounds().contains(pos)) {
+      map.setView(pos, map.getZoom());
+    }
+  }, [la, ln, map]);
+
+  return null;
+}
+
 const MaximizeIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="15 3 21 3 21 9" />
@@ -213,6 +240,7 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
           <TileLayer url={layer.url} attribution={layer.attribution} />
           <FlyTo target={flyTarget} />
           <ResizeFix trigger={isFullscreen} />
+          <FollowPosition position={hasPosition ? position : null} />
           {hasPosition && (
             <Marker
               position={position}

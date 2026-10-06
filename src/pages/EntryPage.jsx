@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Folder, MapPin, ChevronLeft, ClipboardList, WifiOff, RefreshCw, Home } from 'lucide-react';
+import { Folder, MapPin, ChevronLeft, ClipboardList, WifiOff, RefreshCw, Home, Plus } from 'lucide-react';
 import api from '../api/axios';
 import toast from 'react-hot-toast';
 import SurveyForm from './SuperAdmin/SurveyForm';
@@ -24,6 +24,11 @@ export default function EntryPage() {
   const [selectedProject, setSelectedProject] = useState('');
   const [selectedFormType, setSelectedFormType] = useState('');
   const [search, setSearch] = useState('');
+
+  // "New Form" box (step 2)
+  const [showNewForm, setShowNewForm] = useState(false);
+  const [newFormType, setNewFormType] = useState('');
+  const [creatingForm, setCreatingForm] = useState(false);
 
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingCount, setPendingCount] = useState(getPendingSubmissions().length);
@@ -105,8 +110,56 @@ export default function EntryPage() {
     setPendingCount(getPendingSubmissions().length);
   };
 
+  // Create a new (empty) form for the selected project. Questions are added
+  // later from Survey Forms (Builder).
+  const handleCreateForm = async () => {
+    const name = newFormType.trim().replace(/\s+/g, ' ');
+    if (!name) return toast.error('Enter a name for the new form');
+    if (name.length > 40) return toast.error('Form name is too long (max 40 characters)');
+    if (name.toLowerCase() === 'common') return toast.error('"Common" is reserved — choose another name');
+    if (enabledList.some((t) => t.toLowerCase() === name.toLowerCase())) {
+      return toast.error(`A form named "${name}" already exists for this project`);
+    }
+    if (!navigator.onLine) return toast.error('You need to be online to create a new form.');
+
+    setCreatingForm(true);
+    try {
+      const res = await api.post('/forms', {
+        project: selectedProject,
+        formType: name,
+        title: name,
+        description: '',
+        questions: [],
+      });
+      if (res.data.success) {
+        // show the new form in the list right away
+        setProjects((prev) =>
+          prev.map((p) =>
+            p._id === selectedProject
+              ? { ...p, enabledForms: [...(p.enabledForms || []), name] }
+              : p
+          )
+        );
+        toast.success(`"${name}" form created`);
+        setShowNewForm(false);
+        setNewFormType('');
+      } else {
+        toast.error(res.data.message || 'Could not create the form');
+      }
+    } catch (err) {
+      if (err.response?.status === 409) {
+        toast.error(`A form named "${name}" already exists for this project`);
+      } else {
+        toast.error(err.response?.data?.message || 'Could not create the form');
+      }
+    } finally {
+      setCreatingForm(false);
+    }
+  };
+
   const filteredProjects = projects.filter((p) => p.name?.toLowerCase().includes(search.toLowerCase()));
   const activeProject = projects.find((p) => p._id === selectedProject);
+  const enabledList = activeProject?.enabledForms || [];
   const step = !selectedProject ? 1 : !selectedFormType ? 2 : 3;
 
   if (loading) {
@@ -213,30 +266,69 @@ export default function EntryPage() {
         {step === 2 && (
           <div>
             <button
-              onClick={() => setSelectedProject('')}
+              onClick={() => { setSelectedProject(''); setShowNewForm(false); setNewFormType(''); }}
               className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-4"
             >
               <ChevronLeft className="w-4 h-4" /> {activeProject?.name}
             </button>
-            {activeProject?.enabledForms?.length ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {activeProject.enabledForms.map((ft) => (
-                  <button
-                    key={ft}
-                    onClick={() => setSelectedFormType(ft)}
-                    className="p-5 bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all text-center"
-                  >
-                    <ClipboardList className="w-6 h-6 text-blue-600 mx-auto mb-2" />
-                    <span className="text-sm font-semibold text-gray-800">{ft}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-14 bg-white rounded-2xl border border-gray-100">
-                <ClipboardList className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-500 text-sm">
-                  No forms are enabled for this project yet.<br />Ask your Super Admin or Admin to enable one.
+            <p className="text-sm text-gray-500 mb-3">
+              {enabledList.length
+                ? 'Choose a form to fill in, or create a new one.'
+                : 'No forms yet for this project — create one to get started.'}
+            </p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {enabledList.map((ft) => (
+                <button
+                  key={ft}
+                  onClick={() => setSelectedFormType(ft)}
+                  className="p-5 bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all text-center"
+                >
+                  <ClipboardList className="w-6 h-6 text-blue-600 mx-auto mb-2" />
+                  <span className="text-sm font-semibold text-gray-800">{ft}</span>
+                </button>
+              ))}
+
+              <button
+                onClick={() => setShowNewForm((v) => !v)}
+                className={`p-5 rounded-2xl border-2 border-dashed text-center transition-all ${
+                  showNewForm ? 'border-blue-500 bg-blue-50' : 'border-blue-300 bg-blue-50/40 hover:bg-blue-50'
+                }`}
+              >
+                <Plus className="w-6 h-6 text-blue-600 mx-auto mb-2" />
+                <span className="text-sm font-semibold text-blue-700">New Form</span>
+              </button>
+            </div>
+
+            {showNewForm && (
+              <div className="mt-4 bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                <p className="text-sm font-semibold text-gray-800 mb-1">Create a new form</p>
+                <p className="text-xs text-gray-500 mb-3">
+                  Give the new form a name, for example "Hospital" or "School".
                 </p>
+                <input
+                  value={newFormType}
+                  onChange={(e) => setNewFormType(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreateForm()}
+                  maxLength={40}
+                  placeholder="New form name"
+                  className="w-full mb-4 px-4 py-2.5 border border-gray-200 rounded-xl text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleCreateForm}
+                    disabled={!newFormType.trim() || creatingForm}
+                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {creatingForm ? 'Creating...' : 'Create Form'}
+                  </button>
+                  <button
+                    onClick={() => { setShowNewForm(false); setNewFormType(''); }}
+                    className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
           </div>

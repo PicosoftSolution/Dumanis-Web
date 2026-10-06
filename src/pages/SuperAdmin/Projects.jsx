@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Power, Search, Folder, MapPin, Calendar, CheckCircle, XCircle, X, Users, UserPlus, ClipboardList, Navigation } from 'lucide-react';
+import { Plus, Edit2, Power, Search, Folder, MapPin, Calendar, CheckCircle, XCircle, X, Users, UserPlus, Navigation } from 'lucide-react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import MapPicker from '../../components/MapPicker';
 
-const FORM_TYPES = ['Residential', 'Commercial', 'Industrial', 'Institutional', 'Open Site', 'Apartment'];
-
+// Note: `enabledForms` is still carried in the form data (hidden) so that
+// editing a project never wipes the list of forms created for it — it is just
+// no longer shown or editable on this screen.
 const EMPTY_FORM = {
   name: '',
   description: '',
@@ -142,15 +143,6 @@ export default function Projects() {
       assignedUserIds: prev.assignedUserIds.includes(memberId)
         ? prev.assignedUserIds.filter(id => id !== memberId)
         : [...prev.assignedUserIds, memberId]
-    }));
-  };
-
-  const toggleForm = (formName) => {
-    setFormData(prev => ({
-      ...prev,
-      enabledForms: prev.enabledForms.includes(formName)
-        ? prev.enabledForms.filter(f => f !== formName)
-        : [...prev.enabledForms, formName]
     }));
   };
 
@@ -389,21 +381,6 @@ export default function Projects() {
                   </div>
                 )}
 
-                <div className="mb-4">
-                  <p className="text-xs text-gray-500 mb-2">Enabled Forms:</p>
-                  <div className="flex flex-wrap gap-2">
-                    {project.enabledForms?.length > 0 ? (
-                      project.enabledForms.map(form => (
-                        <span key={form} className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-full">
-                          {form}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-gray-400 text-sm">No forms enabled</span>
-                    )}
-                  </div>
-                </div>
-
                 <div className="flex items-center justify-between pt-3 border-t border-gray-100">
                   <span className={`inline-flex items-center gap-1 text-xs font-medium ${project.isActive ? 'text-green-600' : 'text-red-600'}`}>
                     {project.isActive ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
@@ -619,33 +596,6 @@ export default function Projects() {
                     )}
                   </div>
                 )}
-
-                {/* Enable Forms */}
-                <div className="pt-1 border-t border-gray-100">
-                  <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 mt-4 mb-2">
-                    <ClipboardList className="w-3.5 h-3.5 text-gray-400" />
-                    Enable Forms
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {FORM_TYPES.map(form => {
-                      const checked = formData.enabledForms.includes(form);
-                      return (
-                        <button
-                          type="button"
-                          key={form}
-                          onClick={() => toggleForm(form)}
-                          className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                            checked
-                              ? 'bg-blue-600 border-blue-600 text-white'
-                              : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'
-                          }`}
-                        >
-                          {form}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
 
               {/* Footer */}

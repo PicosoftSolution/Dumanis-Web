@@ -38,6 +38,7 @@ function QuestionRow({ fq, index, onToggleVisible, onToggleMandatory, onMoveUp, 
   const q = fq.question;
   return (
     <div
+      className="dfb-qrow"
       style={{
         display: "flex",
         alignItems: "center",
@@ -95,8 +96,8 @@ const QUESTION_TYPES = [
   "checkbox",   // multi choice pills (needs options)
   "switch",     // yes/no toggle
   "textarea",   // multi-line text
-  "location", 
-  "number"
+  "location",
+  "number",
 ];
 
 const needsOptionsFor = (type) => ["select", "radio", "checkbox"].includes(type);
@@ -109,14 +110,46 @@ const optionsToText = (options) => (options || []).map((o) => o.label ?? o.value
 const textToOptions = (text) =>
   text.split(",").map((s) => s.trim()).filter(Boolean).map((v) => ({ label: v, value: v }));
 
+// ── Mobile-only styles (desktop layout is untouched) ──────────
+const DFB_CSS = `
+@media (max-width: 700px) {
+  .dfb-root { padding: 12px !important; width: 100%; max-width: 100vw !important; box-sizing: border-box; overflow-x: hidden; }
+  .dfb-root h2 { font-size: 20px; }
+  .dfb-root input, .dfb-root select, .dfb-root textarea {
+    font-size: 16px !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .dfb-row { flex-direction: column !important; gap: 10px !important; }
+  .dfb-row > * { flex: none !important; width: 100% !important; }
+  .dfb-grid { grid-template-columns: 1fr !important; gap: 24px !important; }
+  .dfb-qrow { flex-wrap: wrap !important; gap: 8px !important; }
+  .dfb-qrow > span:first-child { display: none !important; }
+  .dfb-qrow > span:nth-child(2) { flex: 1 1 100% !important; overflow-wrap: anywhere; }
+  .dfb-arow { flex-wrap: wrap !important; gap: 8px !important; }
+  .dfb-arow > div:first-child { flex: 1 1 100% !important; min-width: 0; overflow-wrap: anywhere; }
+  .dfb-ahead, .dfb-actions { flex-wrap: wrap !important; gap: 8px !important; }
+  .dfb-root button { min-height: 36px; }
+}
+`;
+
 // ── Main DynamicFormBuilder ───────────────────────────────────
 export default function DynamicFormBuilder() {
-  const FORM_TYPES = ["Residential", "Commercial", "Industrial", "Institutional", "Apartment", "Open Site"];
-
   const [projects, setProjects] = useState([]);
   const [allQuestions, setAllQuestions] = useState([]);
-  const [selectedProject, setSelectedProject] = useState("");
-  const [selectedFormType, setSelectedFormType] = useState("Residential");
+
+  // When opened from the New Entry page ("New Form"), the project and form
+  // type arrive in the URL (?projectId=...&formType=...) and are preselected.
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlProjectId = urlParams.get("projectId") || "";
+  const urlFormType = urlParams.get("formType") || "";
+
+  const [selectedProject, setSelectedProject] = useState(urlProjectId);
+  // No hard-coded default form types any more — starts empty and is
+  // auto-filled from the selected project's own forms.
+  const [selectedFormType, setSelectedFormType] = useState(urlFormType);
+  const [projectForms, setProjectForms] = useState([]); // forms already created for the selected project
   const [existingForm, setExistingForm] = useState(null);
   const [formTitle, setFormTitle] = useState("");
   const [formDesc, setFormDesc] = useState("");
@@ -132,13 +165,46 @@ export default function DynamicFormBuilder() {
   const [editQ, setEditQ] = useState({ label: "", type: "text", optionsText: "", isMandatory: false });
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // Only the form types that belong to the selected project:
+  //  - enabledForms saved on the project
+  //  - types of forms already created for it
+  //  - the form type passed via URL (only for the project from the URL)
+  const currentProject = projects.find((p) => p._id === selectedProject);
+  const formTypeOptions = Array.from(
+    new Set([
+      ...(currentProject?.enabledForms || []),
+      ...projectForms.map((f) => f.formType),
+      ...(urlFormType && selectedProject === urlProjectId ? [urlFormType] : []),
+    ].filter(Boolean))
+  );
+  const formTypeKey = formTypeOptions.join("|");
+
   useEffect(() => {
     api.get("/api/projects").then((r) => r.success && setProjects(r.data));
   }, []);
 
+  // Load all forms already created for the selected project
+  useEffect(() => {
+    if (!selectedProject) { setProjectForms([]); return; }
+    api.get(`/api/forms?projectId=${selectedProject}`).then((r) => {
+      setProjectForms(r.success ? r.data : []);
+    });
+  }, [selectedProject]);
+
+  // Keep selectedFormType valid for the current project:
+  // if it's empty or doesn't belong to this project, pick the first one.
+  useEffect(() => {
+    if (!selectedProject) return;
+    if (!selectedFormType || !formTypeOptions.includes(selectedFormType)) {
+      setSelectedFormType(formTypeOptions[0] || "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProject, formTypeKey]);
+
   // Re-fetch the question bank whenever the form type changes, so only
   // relevant questions (+ 'Common' ones) show up automatically.
   useEffect(() => {
+    if (!selectedFormType) { setAllQuestions([]); return; }
     api.get(`/api/questions?formType=${encodeURIComponent(selectedFormType)}`).then(
       (r) => r.success && setAllQuestions(r.data)
     );
@@ -146,9 +212,11 @@ export default function DynamicFormBuilder() {
 
   // Load form when project+formType changes
   useEffect(() => {
-    if (!selectedProject) return;
+    if (!selectedProject || !selectedFormType) return;
     setExistingForm(null);
     setFormQuestions([]);
+    setFormTitle("");
+    setFormDesc("");
     api.get(`/api/forms?projectId=${selectedProject}`).then((r) => {
       if (r.success) {
         const found = r.data.find((f) => f.formType === selectedFormType);
@@ -319,6 +387,7 @@ export default function DynamicFormBuilder() {
 
   const saveForm = async () => {
     if (!selectedProject) return setMsg({ type: "error", text: "Please select a project first" });
+    if (!selectedFormType) return setMsg({ type: "error", text: "No form type available for this project" });
     setSaving(true);
     setMsg(null);
     const payload = {
@@ -345,23 +414,34 @@ export default function DynamicFormBuilder() {
     if (res.success) {
       setMsg({ type: "success", text: existingForm ? "Form updated!" : "Form created!" });
       setExistingForm(res.data);
+      // keep the project's form list in sync so the dropdown stays correct
+      setProjectForms((prev) =>
+        prev.some((f) => f._id === res.data._id)
+          ? prev.map((f) => (f._id === res.data._id ? res.data : f))
+          : [...prev, res.data]
+      );
     } else {
       setMsg({ type: "error", text: res.message || "Error saving form" });
     }
   };
 
   return (
-    <div style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
+    <div className="dfb-root" style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
+      <style>{DFB_CSS}</style>
       <h2 style={{ marginBottom: 4 }}>🛠 Dynamic Form Builder</h2>
       <p style={{ color: "#666", marginBottom: 20 }}>
         Configure a form specific to this project — control question order, mandatory fields, and visibility.
       </p>
 
       {/* Project + FormType selector */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+      <div className="dfb-row" style={{ display: "flex", gap: 12, marginBottom: 20 }}>
         <select
           value={selectedProject}
-          onChange={(e) => setSelectedProject(e.target.value)}
+          onChange={(e) => {
+            setSelectedProject(e.target.value);
+            setSelectedFormType(""); // reset so the new project's own form type gets picked
+            setProjectForms([]);
+          }}
           style={inputStyle}
         >
           <option value="">-- Project Select --</option>
@@ -369,21 +449,29 @@ export default function DynamicFormBuilder() {
             <option key={p._id} value={p._id}>{p.name}</option>
           ))}
         </select>
-        {/* Form type dropdown only appears once a project is selected */}
+        {/* Form type dropdown only appears once a project is selected,
+            and only lists forms that belong to that project */}
         {selectedProject && (
           <select
             value={selectedFormType}
             onChange={(e) => setSelectedFormType(e.target.value)}
             style={inputStyle}
           >
-            {FORM_TYPES.map((ft) => <option key={ft}>{ft}</option>)}
+            {formTypeOptions.length === 0 && <option value="">-- No forms for this project --</option>}
+            {formTypeOptions.map((ft) => <option key={ft} value={ft}>{ft}</option>)}
           </select>
         )}
       </div>
 
-      {selectedProject && (
+      {selectedProject && formTypeOptions.length === 0 && (
+        <p style={{ color: "#999", fontStyle: "italic" }}>
+          No forms have been created for this project yet. Create a new form from the New Entry page first.
+        </p>
+      )}
+
+      {selectedProject && selectedFormType && (
         <>
-          <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+          <div className="dfb-row" style={{ display: "flex", gap: 12, marginBottom: 16 }}>
             <input
               placeholder="Form Title (optional)"
               value={formTitle}
@@ -398,7 +486,7 @@ export default function DynamicFormBuilder() {
             />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+          <div className="dfb-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
             {/* Form question list */}
             <div>
               <h4 style={{ marginBottom: 10 }}>
@@ -424,7 +512,7 @@ export default function DynamicFormBuilder() {
 
             {/* Available questions to add */}
             <div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div className="dfb-ahead" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                 <h4 style={{ margin: 0 }}>Available Questions ({availableQuestions.length})</h4>
                 <button
                   onClick={() => { setShowAddQuestion((v) => !v); setEditingQId(null); }}
@@ -541,6 +629,7 @@ export default function DynamicFormBuilder() {
               {availableQuestions.map((q) => (
                 <div
                   key={q._id}
+                  className="dfb-arow"
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
@@ -583,7 +672,7 @@ export default function DynamicFormBuilder() {
             </div>
           </div>
 
-          <div style={{ marginTop: 20, display: "flex", gap: 12, alignItems: "center" }}>
+          <div className="dfb-actions" style={{ marginTop: 20, display: "flex", gap: 12, alignItems: "center" }}>
             <button
               onClick={saveForm}
               disabled={saving}

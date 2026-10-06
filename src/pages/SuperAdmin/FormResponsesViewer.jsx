@@ -11,11 +11,11 @@ const getToken = () => localStorage.getItem("token");
 const headers = () => ({ Authorization: `Bearer ${getToken()}` });
 
 export default function FormResponsesViewer() {
-  const FORM_TYPES = ["Residential", "Commercial", "Institutional", "Apartment", "Open Site"];
-
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState("");
-  const [formType, setFormType] = useState("Residential");
+  // No hard-coded default form types — filled from the selected project's own forms.
+  const [formType, setFormType] = useState("");
+  const [projectForms, setProjectForms] = useState([]); // forms created for the selected project
   const [responses, setResponses] = useState([]);
   const [questionMap, setQuestionMap] = useState({});
   const [total, setTotal] = useState(0);
@@ -31,6 +31,18 @@ export default function FormResponsesViewer() {
   const [error, setError] = useState("");
   const [projectsError, setProjectsError] = useState("");
   const [expandedId, setExpandedId] = useState(null);
+
+  // Only the form types that belong to the selected project:
+  //  - enabledForms saved on the project
+  //  - types of forms already created for it
+  const currentProject = projects.find((p) => p._id === projectId);
+  const formTypeOptions = Array.from(
+    new Set([
+      ...(currentProject?.enabledForms || []),
+      ...projectForms.map((f) => f.formType),
+    ].filter(Boolean))
+  );
+  const formTypeKey = formTypeOptions.join("|");
 
   // Load projects with proper error handling
   useEffect(() => {
@@ -53,6 +65,25 @@ export default function FormResponsesViewer() {
         );
       });
   }, []);
+
+  // Load the forms that exist for the selected project
+  useEffect(() => {
+    if (!projectId) { setProjectForms([]); return; }
+    fetch(`${API}/api/forms?projectId=${projectId}`, { headers: headers() })
+      .then((r) => r.json())
+      .then((r) => setProjectForms(r.success ? r.data : []))
+      .catch(() => setProjectForms([]));
+  }, [projectId]);
+
+  // Keep formType valid for the current project:
+  // if empty or not part of this project, pick its first form type.
+  useEffect(() => {
+    if (!projectId) return;
+    if (!formType || !formTypeOptions.includes(formType)) {
+      setFormType(formTypeOptions[0] || "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, formTypeKey]);
 
   // Helper: quick "this month" range
   const setThisMonth = () => {
@@ -78,7 +109,13 @@ export default function FormResponsesViewer() {
   };
 
   const loadResponses = () => {
-    if (!projectId) return;
+    if (!projectId || !formType) {
+      setResponses([]);
+      setQuestionMap({});
+      setTotal(0);
+      setPages(1);
+      return;
+    }
     setLoading(true);
     setError("");
     const params = buildParams();
@@ -292,7 +329,7 @@ export default function FormResponsesViewer() {
   };
 
   const exportFile = async (format) => {
-    if (!projectId || exporting) return;
+    if (!projectId || !formType || exporting) return;
     setExporting(format);
     try {
       if (format === "geojson") {
@@ -348,13 +385,29 @@ export default function FormResponsesViewer() {
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
-        <select value={projectId} onChange={(e) => { setProjectId(e.target.value); setPage(1); }} style={sel}>
+        <select
+          value={projectId}
+          onChange={(e) => {
+            setProjectId(e.target.value);
+            setFormType(""); // reset so the new project's own form type gets picked
+            setProjectForms([]);
+            setResponses([]);
+            setPage(1);
+          }}
+          style={sel}
+        >
           <option value="">-- Project --</option>
           {projects.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
         </select>
-        <select value={formType} onChange={(e) => { setFormType(e.target.value); setPage(1); }} style={sel}>
-          {FORM_TYPES.map((ft) => <option key={ft}>{ft}</option>)}
-        </select>
+
+        {/* Form type dropdown only appears once a project is selected,
+            and only lists forms that belong to that project */}
+        {projectId && (
+          <select value={formType} onChange={(e) => { setFormType(e.target.value); setPage(1); }} style={sel}>
+            {formTypeOptions.length === 0 && <option value="">-- No forms for this project --</option>}
+            {formTypeOptions.map((ft) => <option key={ft} value={ft}>{ft}</option>)}
+          </select>
+        )}
 
         {/* Date range instead of single date */}
         <div style={dateGroup}>
@@ -369,7 +422,7 @@ export default function FormResponsesViewer() {
         {(fromDate || toDate) && <button onClick={clearDates} style={quickBtn}>Clear dates</button>}
 
         {/* Export buttons */}
-        {projectId && (
+        {projectId && formType && (
           <div style={{ display: "flex", gap: 8, marginLeft: "auto", alignItems: "center" }}>
             {exporting && <span style={{ fontSize: 12, color: "#666" }}>Preparing {exporting}...</span>}
             <ExportBtn label="📊 Excel" color="#1e7e34" disabled={!!exporting} onClick={() => exportFile("excel")} />
@@ -378,6 +431,12 @@ export default function FormResponsesViewer() {
           </div>
         )}
       </div>
+
+      {projectId && formTypeOptions.length === 0 && (
+        <div style={{ padding: 40, textAlign: "center", color: "#999", fontStyle: "italic" }}>
+          No forms have been created for this project yet.
+        </div>
+      )}
 
       {/* Stats bar */}
       {total > 0 && (
@@ -477,7 +536,7 @@ export default function FormResponsesViewer() {
         </div>
       )}
 
-      {!loading && !error && responses.length === 0 && projectId && (
+      {!loading && !error && responses.length === 0 && projectId && formType && (
         <div style={{ padding: 40, textAlign: "center", color: "#999" }}>
           No submissions found for selected filters.
         </div>
