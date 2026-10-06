@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Power, Search, Folder, MapPin, Calendar, CheckCircle, XCircle, X, Users, UserPlus, Navigation } from 'lucide-react';
+import { Plus, Edit2, Power, Search, Folder, MapPin, Calendar, CheckCircle, XCircle, X, Users, UserPlus, Navigation, ClipboardList } from 'lucide-react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import MapPicker from '../../components/MapPicker';
 
-// Note: `enabledForms` is still carried in the form data (hidden) so that
-// editing a project never wipes the list of forms created for it — it is just
-// no longer shown or editable on this screen.
+// `enabledForms` holds the names of the forms created for this project
+// (e.g. "Hospital", "School"). They are managed in the "Forms" section of
+// the create/edit modal, and show up on the Entry page for field users.
 const EMPTY_FORM = {
   name: '',
   description: '',
@@ -36,6 +36,7 @@ export default function Projects() {
   const [teamMembers, setTeamMembers] = useState([]);
   const [fetching, setFetching] = useState(true);
   const [formData, setFormData] = useState(EMPTY_FORM);
+  const [newFormName, setNewFormName] = useState(''); // input for the "Forms" section
 
   // Fetch projects from API
   const fetchProjects = async () => {
@@ -92,6 +93,7 @@ export default function Projects() {
   );
 
   const handleOpenModal = (project = null) => {
+    setNewFormName('');
     if (project) {
       setEditingProject(project);
       setFormData({
@@ -120,6 +122,23 @@ export default function Projects() {
         ? prev.assignedAdminIds.filter(id => id !== adminId)
         : [...prev.assignedAdminIds, adminId]
     }));
+  };
+
+  // ── Forms section (add / remove form names for this project) ──
+  const addFormName = () => {
+    const name = newFormName.trim().replace(/\s+/g, ' ');
+    if (!name) return toast.error('Enter a name for the new form');
+    if (name.length > 40) return toast.error('Form name is too long (max 40 characters)');
+    if (name.toLowerCase() === 'common') return toast.error('"Common" is reserved — choose another name');
+    if (formData.enabledForms.some((t) => t.toLowerCase() === name.toLowerCase())) {
+      return toast.error(`A form named "${name}" already exists for this project`);
+    }
+    setFormData(prev => ({ ...prev, enabledForms: [...prev.enabledForms, name] }));
+    setNewFormName('');
+  };
+
+  const removeFormName = (name) => {
+    setFormData(prev => ({ ...prev, enabledForms: prev.enabledForms.filter((f) => f !== name) }));
   };
 
   // The project (other than the one being edited) this member already belongs to
@@ -216,13 +235,37 @@ export default function Projects() {
     }
     setLoading(true);
     try {
+      // Form names that are new compared to what the project already had
+      const originalForms = editingProject?.enabledForms || [];
+      const newForms = formData.enabledForms.filter((f) => !originalForms.includes(f));
+      let projectId = editingProject?._id;
+
       if (editingProject) {
         await api.put(`/projects/${editingProject._id}`, formData);
         toast.success('Project updated successfully');
       } else {
-        await api.post('/projects', formData);
+        const res = await api.post('/projects', formData);
+        projectId = res.data?.data?._id || res.data?.data?.project?._id || res.data?._id;
         toast.success('Project created successfully');
       }
+
+      // Create an (empty) form record for every newly added form name so it's
+      // ready to be built in Survey Forms (Builder). Already-existing ones
+      // (409) are ignored.
+      if (projectId && newForms.length > 0) {
+        await Promise.allSettled(
+          newForms.map((name) =>
+            api.post('/forms', {
+              project: projectId,
+              formType: name,
+              title: name,
+              description: '',
+              questions: [],
+            })
+          )
+        );
+      }
+
       setShowModal(false);
       fetchProjects();
     } catch (error) {
@@ -359,6 +402,23 @@ export default function Projects() {
                         ))
                       ) : (
                         <span className="text-amber-600 text-sm">Not assigned to any Admin yet</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {canManage && (
+                  <div className="mb-4">
+                    <p className="text-xs text-gray-500 mb-2">Forms ({project.enabledForms?.length || 0}):</p>
+                    <div className="flex flex-wrap gap-2">
+                      {project.enabledForms?.length > 0 ? (
+                        project.enabledForms.map(f => (
+                          <span key={f} className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-full">
+                            {f}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-gray-400 text-sm">No forms added yet</span>
                       )}
                     </div>
                   </div>
@@ -546,6 +606,67 @@ export default function Projects() {
                             </button>
                           );
                         })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Forms for this project (New Form) */}
+                {canManage && (
+                  <div className="pt-1 border-t border-gray-100">
+                    <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 mt-4 mb-1">
+                      <ClipboardList className="w-3.5 h-3.5 text-gray-400" />
+                      Forms
+                      <span className="text-gray-400 font-normal">({formData.enabledForms.length} added)</span>
+                    </label>
+                    <p className="text-[11px] text-gray-400 mb-2">
+                      Add the forms for this project, for example "Hospital" or "School". Field users will see these on the Entry page.
+                    </p>
+
+                    <div className="flex gap-2 mb-3">
+                      <input
+                        type="text"
+                        value={newFormName}
+                        onChange={(e) => setNewFormName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') { e.preventDefault(); addFormName(); }
+                        }}
+                        maxLength={40}
+                        placeholder="New form name"
+                        className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-colors"
+                      />
+                      <button
+                        type="button"
+                        onClick={addFormName}
+                        disabled={!newFormName.trim()}
+                        className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50 shrink-0"
+                      >
+                        <Plus className="w-4 h-4" /> Add Form
+                      </button>
+                    </div>
+
+                    {formData.enabledForms.length === 0 ? (
+                      <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2.5">
+                        No forms added yet.
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {formData.enabledForms.map((f) => (
+                          <span
+                            key={f}
+                            className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 rounded-full text-xs font-medium bg-blue-50 border border-blue-200 text-blue-700"
+                          >
+                            {f}
+                            <button
+                              type="button"
+                              onClick={() => removeFormName(f)}
+                              title={`Remove "${f}"`}
+                              className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-blue-200 transition-colors"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
                       </div>
                     )}
                   </div>
