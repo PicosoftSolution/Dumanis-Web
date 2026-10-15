@@ -20,10 +20,6 @@ const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { key: 'admins', label: 'Admin List', icon: Shield },
   { key: 'projects', label: 'Projects', icon: FolderKanban },
-  { key: 'templates', label: 'Templates', icon: Layers },
-  { key: 'dynamic-forms', label: 'Survey Forms (Builder)', icon: FormInput },
-  { key: 'form-responses', label: 'Form Responses', icon: FileText },
-  { key: 'team', label: 'Team Members', icon: Users },
   { key: 'entries', label: 'All Entries', icon: FileText },
   { key: 'reports', label: 'Reports', icon: BarChart3 },
 ];
@@ -44,15 +40,6 @@ export default function Sidebar({ active, onChange, user, onLogout }) {
       </div>
 
       {/* Entry — quick access to fill a survey, same right every role has */}
-      <div className="px-4 pt-4">
-        <Link
-          to="/entry"
-          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all duration-200 border border-white/20"
-        >
-          <PenSquare className="w-5 h-5" />
-          <span className="text-sm font-semibold">New Entry</span>
-        </Link>
-      </div>
 
 
       {/* Navigation */}

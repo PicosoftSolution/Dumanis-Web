@@ -98,6 +98,7 @@ const QUESTION_TYPES = [
   "textarea",   // multi-line text
   "location",
   "number",
+   "media",   
 ];
 
 const needsOptionsFor = (type) => ["select", "radio", "checkbox"].includes(type);

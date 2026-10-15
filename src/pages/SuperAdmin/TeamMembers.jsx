@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Power, Search, Users, Shield } from 'lucide-react';
+import { Plus, Edit2, Power, Search, Users, Shield, Trash2 } from 'lucide-react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
@@ -7,7 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 export default function TeamMembers() {
   const { user } = useAuth();
   // Super Admin can still add a Lead/Team Member directly if needed, but the
-  // day-to-day edit/deactivate controls belong to the Admin or Lead who
+  // day-to-day edit/deactivate/delete controls belong to the Admin or Lead who
   // actually owns that person's project.
   const isSuperAdmin = user?.role === 'super_admin';
   // Admin manages Leads from the separate "Team Leads" page, so this page
@@ -149,6 +149,18 @@ export default function TeamMembers() {
     }
   };
 
+  const deleteMember = async (member) => {
+    const label = member.role === 'lead' ? 'lead' : 'team member';
+    if (!window.confirm(`Are you sure you want to delete ${member.firstName} ${member.lastName}? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/users/${member._id}`);
+      toast.success(`${label.charAt(0).toUpperCase() + label.slice(1)} deleted successfully`);
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.message || `Failed to delete ${label}`);
+    }
+  };
+
   if (fetching) {
     return (
       <div className="flex items-center justify-center h-96 px-4">
@@ -163,9 +175,6 @@ export default function TeamMembers() {
         <h1 className="text-xl sm:text-2xl font-bold text-gray-800">
           {isAdmin ? 'Team Members' : 'Team Management'}
         </h1>
-        <p className="text-gray-500 mt-1 text-sm sm:text-base">
-          {isAdmin ? 'Manage team members' : 'Manage leads and team members'}
-        </p>
       </div>
 
       {/* Search / filter / add bar */}
@@ -229,6 +238,9 @@ export default function TeamMembers() {
                   <button onClick={() => toggleStatus(member)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-sm rounded-lg border ${member.isActive ? 'text-red-600 border-red-200 hover:bg-red-50' : 'text-green-600 border-green-200 hover:bg-green-50'}`}>
                     <Power className="w-4 h-4" /> {member.isActive ? 'Deactivate' : 'Activate'}
                   </button>
+                  <button onClick={() => deleteMember(member)} className="flex-1 flex items-center justify-center gap-1.5 py-2 text-sm text-red-600 border border-red-200 hover:bg-red-50 rounded-lg">
+                    <Trash2 className="w-4 h-4" /> Delete
+                  </button>
                 </div>
               )}
             </div>
@@ -280,11 +292,14 @@ export default function TeamMembers() {
                       <span className="text-xs text-gray-400 italic">Managed by their Admin/Lead</span>
                     ) : (
                       <div className="flex gap-2">
-                        <button onClick={() => handleOpenModal(member)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
+                        <button onClick={() => handleOpenModal(member)} title="Edit" className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button onClick={() => toggleStatus(member)} className={`p-2 rounded-lg ${member.isActive ? 'text-red-600 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'}`}>
+                        <button onClick={() => toggleStatus(member)} title={member.isActive ? 'Deactivate' : 'Activate'} className={`p-2 rounded-lg ${member.isActive ? 'text-red-600 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'}`}>
                           <Power className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => deleteMember(member)} title="Delete" className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     )}

@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import api from "../../api/axios";
 import { queueSubmission, cacheForm, getCachedForm } from "../../utils/offlineSync";
@@ -37,11 +36,55 @@ const TYPE_ALIASES = {
   boolean: "switch",
   location: "location",
   map: "location",
+  // Aadhaar spelling variants
+  aadhaar: "aadhaar",
+  aadhar: "aadhaar",
+  adhar: "aadhaar",
+  aadhaar_number: "aadhaar",
+  // NEW: media upload (old "image" questions use the new uploader too)
+  media: "media",
+  file: "media",
+  upload: "media",
+  image: "media",
+  video: "media",
+  audio: "media",
 };
 
+// Decide the real field type. Any question whose label/fieldName says
+// Aadhaar/Aadhar/Adhar is treated as "aadhaar" even if it was saved in the
+// DB as plain "text" or "number" — so old questions are restricted too.
+const looksLikeAadhaar = (str) => /a{1,2}dh?a{1,2}r/i.test(String(str || ""));
+const resolveType = (q) => {
+  const t = TYPE_ALIASES[q?.type] || q?.type;
+  if ((!t || t === "text" || t === "number") && (looksLikeAadhaar(q?.label) || looksLikeAadhaar(q?.fieldName))) {
+    return "aadhaar";
+  }
+  return t;
+};
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^(?:\+?91[\s-]?)?0?([6-9]\d{9})$/;
+const AADHAAR_RE = /^[2-9]\d{11}$/; // exactly 12 digits, cannot start with 0 or 1
+const ENABLE_AADHAAR_CHECKSUM = true; // set false if you need to allow dummy test numbers
+
+// Verhoeff checksum (the algorithm real Aadhaar numbers follow)
+const V_D = [
+  [0,1,2,3,4,5,6,7,8,9],[1,2,3,4,0,6,7,8,9,5],[2,3,4,0,1,7,8,9,5,6],
+  [3,4,0,1,2,8,9,5,6,7],[4,0,1,2,3,9,5,6,7,8],[5,9,8,7,6,0,4,3,2,1],
+  [6,5,9,8,7,1,0,4,3,2],[7,6,5,9,8,2,1,0,4,3],[8,7,6,5,9,3,2,1,0,4],
+  [9,8,7,6,5,4,3,2,1,0],
+];
+const V_P = [
+  [0,1,2,3,4,5,6,7,8,9],[1,5,7,6,2,8,3,0,9,4],[5,8,0,3,7,9,6,1,4,2],
+  [8,9,1,6,0,4,3,5,2,7],[9,4,5,3,1,2,6,8,7,0],[4,2,8,6,5,7,3,9,0,1],
+  [2,7,9,3,8,0,6,4,1,5],[7,0,4,6,9,1,3,2,5,8],
+];
+const verhoeffValid = (num) => {
+  let c = 0;
+  const digits = String(num).split("").reverse().map(Number);
+  for (let i = 0; i < digits.length; i++) c = V_D[c][V_P[i % 8][digits[i]]];
+  return c === 0;
+};
 
 export const validateFieldFormat = (resolvedType, rawValue) => {
   if (rawValue === undefined || rawValue === null || rawValue === "") return null;
@@ -50,6 +93,14 @@ export const validateFieldFormat = (resolvedType, rawValue) => {
   }
   if (resolvedType === "phone" || resolvedType === "mobile") {
     return PHONE_RE.test(String(rawValue).trim()) ? null : "Enter a valid 10-digit phone number";
+  }
+  if (resolvedType === "aadhaar") {
+    const v = String(rawValue).replace(/\s/g, "");
+    if (!/^\d+$/.test(v)) return "Aadhaar number must contain digits only";
+    if (v.length !== 12) return "Aadhaar number must be exactly 12 digits";
+    if (!AADHAAR_RE.test(v)) return "Aadhaar number cannot start with 0 or 1";
+    if (ENABLE_AADHAAR_CHECKSUM && !verhoeffValid(v)) return "Enter a valid Aadhaar number";
+    return null;
   }
   return null;
 };
@@ -98,10 +149,150 @@ function LocationField({ fieldName, value, onChange, gps, gpsStatus, onRetryGPS 
   );
 }
 
+// ── Media upload field ────────────────────────────────────────
+const MEDIA_MAX_FILES = 3;     // max files per question
+const MEDIA_MAX_MB = 5;       // max size per video/audio/pdf file
+const MEDIA_ACCEPT = "image/*,video/*,audio/*,application/pdf";
+
+const readAsDataURL = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+// Photos are resized + compressed so they stay small (important for
+// slow networks and for saving entries offline).
+const compressImage = (file, maxSize = 1280, quality = 0.7) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read image"));
+    };
+    img.src = url;
+  });
+
+function MediaField({ fieldName, value, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const [localError, setLocalError] = useState("");
+  const files = Array.isArray(value) ? value : value ? [value] : []; // supports old single base64 value
+
+  const handleFiles = async (e) => {
+    const picked = Array.from(e.target.files || []);
+    e.target.value = ""; // allow picking the same file again
+    if (picked.length === 0) return;
+
+    setLocalError("");
+    if (files.length + picked.length > MEDIA_MAX_FILES) {
+      setLocalError(`You can upload at most ${MEDIA_MAX_FILES} files here`);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const added = [];
+      for (const file of picked) {
+        const isImage = file.type.startsWith("image/");
+        if (!isImage && file.size > MEDIA_MAX_MB * 1024 * 1024) {
+          setLocalError(`"${file.name}" is larger than ${MEDIA_MAX_MB} MB`);
+          continue;
+        }
+        const data = isImage ? await compressImage(file) : await readAsDataURL(file);
+        added.push({
+          name: file.name,
+          type: isImage ? "image/jpeg" : file.type,
+          size: file.size,
+          data, // base64 data URL
+        });
+      }
+      if (added.length) onChange(fieldName, [...files, ...added]);
+    } catch (err) {
+      setLocalError("Couldn't read this file. Please try another one.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeFile = (i) => onChange(fieldName, files.filter((_, idx) => idx !== i));
+
+  const renderPreview = (f) => {
+    const src = typeof f === "string" ? f : f.data;
+    const type = typeof f === "string" ? "image/jpeg" : f.type || "";
+    if (type.startsWith("image/")) return <img src={src} alt="preview" style={{ width: "100%", maxHeight: 140, objectFit: "cover", borderRadius: 6 }} />;
+    if (type.startsWith("video/")) return <video src={src} controls style={{ width: "100%", maxHeight: 160, borderRadius: 6 }} />;
+    if (type.startsWith("audio/")) return <audio src={src} controls style={{ width: "100%" }} />;
+    return <div style={{ fontSize: 28, textAlign: "center" }}>📄</div>;
+  };
+
+  return (
+    <div>
+      <label
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 16px",
+          border: "1.5px dashed #1a73e8", color: "#1a73e8", background: "#f5f8ff",
+          borderRadius: 8, cursor: busy ? "default" : "pointer", fontSize: 13.5, fontWeight: 600,
+          opacity: files.length >= MEDIA_MAX_FILES ? 0.5 : 1,
+        }}
+      >
+        📎 {busy ? "Processing..." : "Upload photo / video / file"}
+        <input
+          type="file"
+          accept={MEDIA_ACCEPT}
+          multiple
+          disabled={busy || files.length >= MEDIA_MAX_FILES}
+          onChange={handleFiles}
+          style={{ display: "none" }}
+        />
+      </label>
+      <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>
+        Max {MEDIA_MAX_FILES} files • Video/audio/PDF up to {MEDIA_MAX_MB} MB • Photos are auto-compressed
+      </div>
+
+      {localError && <div style={{ color: "#e53935", fontSize: 12, marginTop: 4 }}>{localError}</div>}
+
+      {files.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10, marginTop: 10 }}>
+          {files.map((f, i) => (
+            <div key={i} style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: 6, position: "relative", background: "#fafafa" }}>
+              {renderPreview(f)}
+              <div style={{ fontSize: 11, color: "#666", marginTop: 4, overflowWrap: "anywhere" }}>
+                {typeof f === "string" ? "photo" : f.name}
+              </div>
+              <button
+                type="button"
+                onClick={() => removeFile(i)}
+                title="Remove"
+                style={{
+                  position: "absolute", top: 4, right: 4, width: 22, height: 22, borderRadius: "50%",
+                  border: "none", background: "rgba(0,0,0,0.65)", color: "#fff", cursor: "pointer", fontSize: 12, lineHeight: 1,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Field renderer ────────────────────────────────────────────
 export function FormField({ question, value, onChange, error, onBlur, gps, gpsStatus, onRetryGPS }) {
   const { label, fieldName, type, options, isMandatory } = question;
-  const resolvedType = TYPE_ALIASES[type] || type;
+  const resolvedType = resolveType(question);
 
   const inputBase = {
     width: "100%",
@@ -137,11 +328,12 @@ export function FormField({ question, value, onChange, error, onBlur, gps, gpsSt
           value={value || ""}
           onChange={(e) => {
             let v = e.target.value;
-            // Block the wrong kind of character as the user types, instead
+            // Block the wrong kind of character as the user types
             if (resolvedType === "phone" || resolvedType === "mobile") {
               // Phone: digits only, max 10 — letters/symbols never make it in.
               v = v.replace(/\D/g, "").slice(0, 10);
             } else if (resolvedType === "aadhaar") {
+              // Aadhaar: digits only, max 12 — spaces/letters/symbols (even pasted) are stripped.
               v = v.replace(/\D/g, "").slice(0, 12);
             } else if (resolvedType === "email") {
               // Email: no spaces — letters/numbers/symbols like @ . _ - are fine.
@@ -153,10 +345,16 @@ export function FormField({ question, value, onChange, error, onBlur, gps, gpsSt
           placeholder={
             resolvedType === "email" ? "name@example.com"
             : resolvedType === "phone" || resolvedType === "mobile" ? "10-digit mobile number"
+            : resolvedType === "aadhaar" ? "12-digit Aadhaar number"
             : `Enter ${label}`
           }
           style={inputBase}
           inputMode={["phone", "mobile", "aadhaar"].includes(resolvedType) ? "numeric" : undefined}
+          maxLength={
+            resolvedType === "aadhaar" ? 12
+            : resolvedType === "phone" || resolvedType === "mobile" ? 10
+            : undefined
+          }
         />
       );
       break;
@@ -349,27 +547,9 @@ export function FormField({ question, value, onChange, error, onBlur, gps, gpsSt
         </div>
       );
       break;
-    case "image":
-      field = (
-        <div>
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={(e) => {
-              const file = e.target.files[0];
-              if (!file) return;
-              const reader = new FileReader();
-              reader.onload = () => onChange(fieldName, reader.result); // base64
-              reader.readAsDataURL(file);
-            }}
-            style={{ fontSize: 13 }}
-          />
-          {value && (
-            <img src={value} alt="preview" style={{ marginTop: 8, maxWidth: "100%", maxHeight: 120, borderRadius: 6 }} />
-          )}
-        </div>
-      );
+    // NEW: media upload (also handles old "image" questions)
+    case "media":
+      field = <MediaField fieldName={fieldName} value={value} onChange={onChange} />;
       break;
     default:
       field = <input type="text" value={value || ""} onChange={(e) => onChange(fieldName, e.target.value)} style={inputBase} />;
@@ -451,7 +631,7 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
         }
       })
       .catch((err) => {
-      
+        // No response at all = network problem, so fall back to the cached form
         if (!err.response) {
           const cached = getCachedForm(projectId, formType);
           if (cached) {
@@ -467,32 +647,44 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
         setLoading(false);
         fetchGPS(); // auto-request GPS on form load — works offline too (device GPS)
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, formType]);
 
   const handleChange = (fieldName, value, question) => {
     setAnswers((prev) => ({ ...prev, [fieldName]: value }));
 
-    // Re-check format (email/phone) on every keystroke, so a wrong Gmail or
-    const resolvedType = TYPE_ALIASES[question?.type] || question?.type;
+    // Re-check format (email/phone/aadhaar) as the user types, so a wrong
+    // value is flagged immediately.
+    const resolvedType = resolveType(question);
     const isEmpty = value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
-    const formatError = isEmpty ? null : validateFieldFormat(resolvedType, value);
+
+    let formatError = isEmpty ? null : validateFieldFormat(resolvedType, value);
+    // Aadhaar: don't nag while the user is still typing; blur/submit will catch it
+    if (resolvedType === "aadhaar" && String(value || "").length < 12) formatError = null;
+
     setErrors((prev) => ({ ...prev, [fieldName]: formatError }));
   };
 
-  // Fires when the user leaves a field. Catches the "required" case, which
-  // handleChange deliberately skips while they're still typing.
+  // Fires when the user leaves a field. Catches the "required" case and
+  // incomplete formats (e.g. Aadhaar with fewer than 12 digits).
   const handleBlur = (fieldName, value, question) => {
-    if (!question?.isMandatory) return;
+    const resolvedType = resolveType(question);
     const isEmpty = value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
+
     if (isEmpty) {
-      setErrors((prev) => ({ ...prev, [fieldName]: `${question.label} is required` }));
+      if (question?.isMandatory) {
+        setErrors((prev) => ({ ...prev, [fieldName]: `${question.label} is required` }));
+      }
+      return;
     }
+    const formatError = validateFieldFormat(resolvedType, value);
+    if (formatError) setErrors((prev) => ({ ...prev, [fieldName]: formatError }));
   };
 
   const validate = () => {
     const errs = {};
     (form?.questions || []).forEach((q) => {
-      const resolvedType = TYPE_ALIASES[q.type] || q.type;
+      const resolvedType = resolveType(q);
       const val = answers[q.fieldName];
       const isEmpty = val === undefined || val === null || val === "" || (Array.isArray(val) && val.length === 0);
 
@@ -500,8 +692,8 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
         errs[q.fieldName] = `${q.label} is required`;
         return;
       }
-      // Format checks (email/phone) run whenever something was typed,
-      // even for optional fields — an invalid email is invalid either way.
+      // Format checks (email/phone/aadhaar) run whenever something was typed,
+      // even for optional fields — an invalid value is invalid either way.
       if (!isEmpty) {
         const formatError = validateFieldFormat(resolvedType, val);
         if (formatError) errs[q.fieldName] = formatError;
@@ -514,9 +706,11 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
     const errs = validate();
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
-      // Scroll to first error
-      const firstErr = document.querySelector('[data-error="true"]');
-      firstErr?.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Scroll to first error (wait a tick so data-error attributes are updated)
+      setTimeout(() => {
+        const firstErr = document.querySelector('[data-error="true"]');
+        firstErr?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 50);
       return;
     }
 
@@ -603,7 +797,7 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
           It will sync automatically the moment you're back online — you don't need to do anything.
         </p>
         <button
-          onClick={() => { setSavedOffline(false); setAnswers({}); }}
+          onClick={() => { setSavedOffline(false); setAnswers({}); setErrors({}); }}
           style={{ marginTop: 16, padding: "10px 24px", background: "#1a73e8", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}
         >
           New Entry
@@ -619,7 +813,7 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
         <h3 style={{ color: "#2e7d32" }}>Successfully submitted!</h3>
         <p style={{ color: "#666" }}>You can now start a new entry.</p>
         <button
-          onClick={() => { setSubmitted(false); setAnswers({}); }}
+          onClick={() => { setSubmitted(false); setAnswers({}); setErrors({}); }}
           style={{ marginTop: 16, padding: "10px 24px", background: "#1a73e8", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}
         >
           New Entry
@@ -637,7 +831,7 @@ export default function SurveyForm({ projectId, formType, onSuccess, onOffline }
         <span style={badge("#e8f0fe", "#1a73e8")}>{form.formType}</span>
         <span style={badge("#e8f5e9", "#2e7d32")}>{form.totalQuestions} Questions</span>
         <span style={badge(gpsStatus === "ok" ? "#e8f5e9" : "#fff3e0", gpsStatus === "ok" ? "#2e7d32" : "#e65100")}>
-          📍 {gpsStatus === "loading" ? "GPS fetching..." : gpsStatus === "ok" ? `${location.lat.toFixed(5)}, ${location.lon.toFixed(5)}` : "No GPS"}
+          📍 {gpsStatus === "loading" ? "GPS fetching..." : gpsStatus === "ok" && location ? `${location.lat.toFixed(5)}, ${location.lon.toFixed(5)}` : "No GPS"}
         </span>
       </div>
 

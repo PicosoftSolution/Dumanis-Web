@@ -22,11 +22,12 @@ const EMPTY_FORM = {
 export default function Projects() {
   const { user } = useAuth();
   // Both Super Admin and Admin can create/edit/activate-deactivate projects.
+  // Only Admin assigns Leads / Team Members. Super Admin only assigns Admins.
   const canManage = user?.role === 'super_admin' || user?.role === 'admin';
   // Only Super Admin can choose which Admin(s) a project is assigned to.
   const isSuperAdmin = user?.role === 'super_admin';
-  // Only Admin assigns Team Members to projects (Super Admin does not).
-  const isAdmin = user?.role === 'admin';
+  // Leads / Team Members are visible and assignable by Admin only.
+  const canAssignMembers = canManage && !isSuperAdmin;
   const [showModal, setShowModal] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -67,11 +68,10 @@ export default function Projects() {
     }
   };
 
-  // Team members / leads who are NOT in any project yet
-  // (+ members already in this project when editing).
-  // Admin sees only their own team, Super Admin sees everyone.
+  // Leads / Team members available to assign (Admin only).
+  // Admin sees only their own team. Super Admin does not need this list.
   const fetchAssignableUsers = async (projectId) => {
-    if (!isAdmin) return;
+    if (!canAssignMembers) return;
     try {
       const response = await api.get('/projects/assignable-users', {
         params: projectId ? { projectId } : {}
@@ -240,11 +240,16 @@ export default function Projects() {
       const newForms = formData.enabledForms.filter((f) => !originalForms.includes(f));
       let projectId = editingProject?._id;
 
+      // Super Admin does not manage Leads / Team Members, so don't send
+      // assignedUserIds (keeps whatever the Admin already assigned untouched).
+      const payload = { ...formData };
+      if (isSuperAdmin) delete payload.assignedUserIds;
+
       if (editingProject) {
-        await api.put(`/projects/${editingProject._id}`, formData);
+        await api.put(`/projects/${editingProject._id}`, payload);
         toast.success('Project updated successfully');
       } else {
-        const res = await api.post('/projects', formData);
+        const res = await api.post('/projects', payload);
         projectId = res.data?.data?._id || res.data?.data?.project?._id || res.data?._id;
         toast.success('Project created successfully');
       }
@@ -424,18 +429,20 @@ export default function Projects() {
                   </div>
                 )}
 
-                {isAdmin && (
+                {/* Leads & Team Members (Admin only) */}
+                {canAssignMembers && (
                   <div className="mb-4">
-                    <p className="text-xs text-gray-500 mb-2">Team Members ({project.assignedUsers?.length || 0}):</p>
+                    <p className="text-xs text-gray-500 mb-2">Leads & Team Members ({project.assignedUsers?.length || 0}):</p>
                     <div className="flex flex-wrap gap-2">
                       {project.assignedUsers?.length > 0 ? (
                         project.assignedUsers.map(member => (
                           <span key={member._id} className="px-2 py-1 bg-green-50 text-green-700 text-xs rounded-full">
                             {member.firstName} {member.lastName}
+                            {member.role === 'lead' && <span className="ml-1 opacity-75">(Lead)</span>}
                           </span>
                         ))
                       ) : (
-                        <span className="text-gray-400 text-sm">No team members assigned</span>
+                        <span className="text-gray-400 text-sm">No leads or team members assigned</span>
                       )}
                     </div>
                   </div>
@@ -529,7 +536,7 @@ export default function Projects() {
                   </div>
                 </div>
 
-                {/* Location */}
+               {/* Location
                 <div className="pt-1 border-t border-gray-100">
                   <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 mt-4 mb-2">
                     <MapPin className="w-3.5 h-3.5 text-gray-400" />
@@ -572,7 +579,7 @@ export default function Projects() {
                       onChange={handleMapChange}
                     />
                   </div>
-                </div>
+                </div>  */}
 
                 {/* Assign Admins (Super Admin only) */}
                 {isSuperAdmin && (
@@ -581,7 +588,6 @@ export default function Projects() {
                       <Users className="w-3.5 h-3.5 text-gray-400" />
                       Assign to Admin(s)
                     </label>
-                    <p className="text-[11px] text-gray-400 mb-2">Only Super Admin can change this.</p>
                     {admins.length === 0 ? (
                       <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2.5">
                         No Admins found yet. Create one from Admin List first.
@@ -672,17 +678,20 @@ export default function Projects() {
                   </div>
                 )}
 
-                {/* Assign Team Members (Admin only) */}
-                {isAdmin && (
+                {/* Assign Leads & Team Members (Admin only) */}
+                {canAssignMembers && (
                   <div className="pt-1 border-t border-gray-100">
                     <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 mt-4 mb-1">
                       <UserPlus className="w-3.5 h-3.5 text-gray-400" />
-                      Assign Team Members
+                      Assign Leads & Team Members
                       <span className="text-gray-400 font-normal">({formData.assignedUserIds.length} selected)</span>
                     </label>
+                    <p className="text-[11px] text-gray-400 mb-2">
+                      Select each Lead and each Team Member separately. A person can be in only one project.
+                    </p>
                     {teamMembers.length === 0 ? (
                       <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2.5">
-                        No team members found. Add team members first, then assign them to a project here.
+                        No leads or team members found. Add them first, then assign them to a project here.
                       </p>
                     ) : (
                       <div className="flex flex-wrap gap-2">

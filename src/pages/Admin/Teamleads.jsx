@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Power, Search, Users, Shield } from 'lucide-react';
+import { Plus, Edit2, Power, Search, Users, Trash2 } from 'lucide-react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 
@@ -160,6 +160,19 @@ export default function TeamLeads() {
     }
   };
 
+  const deleteLead = async (lead) => {
+    const count = teamCount(lead._id);
+    const extra = count > 0 ? ` This lead has ${count} team member(s).` : '';
+    if (!window.confirm(`Are you sure you want to delete ${lead.firstName} ${lead.lastName}?${extra} This cannot be undone.`)) return;
+    try {
+      await api.delete(`/users/${lead._id}`);
+      toast.success('Team lead deleted successfully');
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to delete team lead');
+    }
+  };
+
   if (fetching) {
     return (
       <div className="flex items-center justify-center h-96 px-4">
@@ -172,9 +185,6 @@ export default function TeamLeads() {
     <div className="p-4 sm:p-6 max-w-full overflow-x-hidden">
       <div className="mb-6">
         <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Team Leads</h1>
-        <p className="text-gray-500 mt-1 text-sm sm:text-base">
-          Manage team leads. Each lead manages their own team members ({leads.length} total)
-        </p>
       </div>
 
       {/* Search / add bar */}
@@ -203,7 +213,7 @@ export default function TeamLeads() {
             <div key={lead._id} className="p-4 flex flex-col gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-blue-100">
-                  < Users className="w-5 h-5 text-blue-600" />
+                  <Users className="w-5 h-5 text-blue-600" />
                 </div>
                 <div className="min-w-0">
                   <p className="font-medium text-gray-900 truncate">{lead.firstName} {lead.lastName}</p>
@@ -224,6 +234,9 @@ export default function TeamLeads() {
                 </button>
                 <button onClick={() => toggleStatus(lead)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-sm rounded-lg border ${lead.isActive ? 'text-red-600 border-red-200 hover:bg-red-50' : 'text-green-600 border-green-200 hover:bg-green-50'}`}>
                   <Power className="w-4 h-4" /> {lead.isActive ? 'Deactivate' : 'Activate'}
+                </button>
+                <button onClick={() => deleteLead(lead)} className="flex-1 flex items-center justify-center gap-1.5 py-2 text-sm text-red-600 border border-red-200 hover:bg-red-50 rounded-lg">
+                  <Trash2 className="w-4 h-4" /> Delete
                 </button>
               </div>
             </div>
@@ -252,7 +265,7 @@ export default function TeamLeads() {
                   <td className="px-4 md:px-6 py-4">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-blue-100">
-                        < Users className="w-5 h-5 text-blue-600" />
+                        <Users className="w-5 h-5 text-blue-600" />
                       </div>
                       <div className="min-w-0">
                         <p className="font-medium text-gray-900 truncate">{lead.firstName} {lead.lastName}</p>
@@ -278,6 +291,10 @@ export default function TeamLeads() {
                       <button onClick={() => toggleStatus(lead)} title={lead.isActive ? 'Deactivate' : 'Activate'}
                         className={`p-2 rounded-lg ${lead.isActive ? 'text-red-600 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'}`}>
                         <Power className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => deleteLead(lead)} title="Delete"
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </td>

@@ -10,15 +10,37 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
+// MapTiler key comes from .env  ->  VITE_MAPTILER_KEY=your_key
+// (If you use Create React App, use process.env.REACT_APP_MAPTILER_KEY instead)
+const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY;
+
+// Highest zoom the map allows (tiles are stretched beyond maxNativeZoom)
+const MAP_MAX_ZOOM = 22;
+
+// Free fallback (used when there is no MapTiler key)
+const ESRI_SATELLITE = {
+  url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  attribution: 'Tiles &copy; Esri',
+  maxNativeZoom: 19,
+  maxZoom: MAP_MAX_ZOOM,
+};
+
+const MAPTILER_SATELLITE = {
+  url: `https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=${MAPTILER_KEY}`,
+  attribution:
+    '&copy; <a href="https://www.maptiler.com/copyright/" target="_blank" rel="noreferrer">MapTiler</a> &copy; OpenStreetMap contributors',
+  maxNativeZoom: 20,
+  maxZoom: MAP_MAX_ZOOM,
+};
+
 const TILE_LAYERS = {
   map: {
     url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; OpenStreetMap contributors',
+    maxNativeZoom: 19,
+    maxZoom: MAP_MAX_ZOOM,
   },
-  satellite: {
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri',
-  },
+  satellite: MAPTILER_KEY ? MAPTILER_SATELLITE : ESRI_SATELLITE,
 };
 
 function ClickToPlace({ onPick }) {
@@ -233,11 +255,17 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
           key={view}
           center={position}
           zoom={hasPosition ? 17 : 12}
+          maxZoom={MAP_MAX_ZOOM}
           zoomControl={true}
           style={{ height: '100%', width: '100%' }}
           scrollWheelZoom={!readOnly}
         >
-          <TileLayer url={layer.url} attribution={layer.attribution} />
+          <TileLayer
+            url={layer.url}
+            attribution={layer.attribution}
+            maxNativeZoom={layer.maxNativeZoom}
+            maxZoom={layer.maxZoom}
+          />
           <FlyTo target={flyTarget} />
           <ResizeFix trigger={isFullscreen} />
           <FollowPosition position={hasPosition ? position : null} />
