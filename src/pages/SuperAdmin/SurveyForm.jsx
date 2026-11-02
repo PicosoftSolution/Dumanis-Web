@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import api from "../../api/axios";
 import { queueSubmission, cacheForm, getCachedForm } from "../../utils/offlineSync";
 import MapPicker from "../../components/MapPicker";
@@ -153,6 +153,7 @@ function LocationField({ fieldName, value, onChange, gps, gpsStatus, onRetryGPS 
 const MEDIA_MAX_FILES = 3;     // max files per question
 const MEDIA_MAX_MB = 5;       // max size per video/audio/pdf file
 const MEDIA_ACCEPT = "image/*,video/*,audio/*,application/pdf";
+const VIDEO_MAX_SECONDS = 30; // camera video auto-stops so the file stays small
 
 const readAsDataURL = (file) =>
   new Promise((resolve, reject) => {
@@ -184,11 +185,204 @@ const compressImage = (file, maxSize = 1280, quality = 0.7) =>
     img.src = url;
   });
 
+// ── Camera modal (in-browser camera: photo + video) ───────────
+function CameraModal({ onCapture, onClose, maxMB }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const recorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const timerRef = useRef(null);
+
+  const [mode, setMode] = useState("photo");           // photo | video
+  const [facing, setFacing] = useState("environment"); // back | front camera
+  const [recording, setRecording] = useState(false);
+  const [secs, setSecs] = useState(0);
+  const [err, setErr] = useState("");
+  const [working, setWorking] = useState(false);
+
+  const stopStream = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+  };
+
+  // Start / restart the camera when mode or facing changes
+  useEffect(() => {
+    let cancelled = false;
+    setErr("");
+    stopStream();
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: facing }, audio: mode === "video" })
+      .then((stream) => {
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+        }
+      })
+      .catch(() => setErr("Camera open avvaledu. Browser settings lo camera permission allow cheyandi."));
+    return () => {
+      cancelled = true;
+      stopStream();
+    };
+  }, [mode, facing]);
+
+  // Cleanup on close
+  useEffect(() => () => {
+    clearInterval(timerRef.current);
+    if (recorderRef.current && recorderRef.current.state === "recording") {
+      recorderRef.current.onstop = null;
+      recorderRef.current.stop();
+    }
+  }, []);
+
+  const takePhoto = () => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return;
+    const scale = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(v.videoWidth * scale);
+    canvas.height = Math.round(v.videoHeight * scale);
+    canvas.getContext("2d").drawImage(v, 0, 0, canvas.width, canvas.height);
+    const data = canvas.toDataURL("image/jpeg", 0.7);
+    onCapture({
+      name: `photo_${Date.now()}.jpg`,
+      type: "image/jpeg",
+      size: Math.round((data.length * 3) / 4),
+      data,
+    });
+  };
+
+  const stopRecording = () => {
+    clearInterval(timerRef.current);
+    if (recorderRef.current && recorderRef.current.state === "recording") {
+      recorderRef.current.stop();
+    }
+    setRecording(false);
+  };
+
+  const startRecording = () => {
+    if (!streamRef.current || typeof MediaRecorder === "undefined") {
+      setErr("Ee browser lo video recording support ledu. 'Upload' option vadandi.");
+      return;
+    }
+    setErr("");
+    chunksRef.current = [];
+    const mimeType = ["video/webm;codecs=vp8,opus", "video/webm", "video/mp4"].find(
+      (m) => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)
+    );
+    let recorder;
+    try {
+      recorder = new MediaRecorder(streamRef.current, {
+        ...(mimeType ? { mimeType } : {}),
+        videoBitsPerSecond: 800000, // keeps files small
+      });
+    } catch (e) {
+      setErr("Video recording start avvaledu.");
+      return;
+    }
+    recorder.ondataavailable = (e) => e.data && e.data.size > 0 && chunksRef.current.push(e.data);
+    recorder.onstop = async () => {
+      const type = recorder.mimeType || mimeType || "video/webm";
+      const blob = new Blob(chunksRef.current, { type });
+      if (blob.size > maxMB * 1024 * 1024) {
+        setErr(`Video ${maxMB} MB kanna pedda undi. Chinna video record cheyandi.`);
+        return;
+      }
+      setWorking(true);
+      try {
+        const data = await readAsDataURL(blob);
+        const ext = type.includes("mp4") ? "mp4" : "webm";
+        onCapture({ name: `video_${Date.now()}.${ext}`, type: type.split(";")[0], size: blob.size, data });
+      } catch (e) {
+        setErr("Video save avvaledu. Malli try cheyandi.");
+        setWorking(false);
+      }
+    };
+    recorderRef.current = recorder;
+    recorder.start(1000);
+    setRecording(true);
+    setSecs(0);
+
+    let elapsed = 0;
+    timerRef.current = setInterval(() => {
+      elapsed += 1;
+      setSecs(elapsed);
+      if (elapsed >= VIDEO_MAX_SECONDS) stopRecording();
+    }, 1000);
+  };
+
+  const circleBtn = (bg) => ({
+    width: 64, height: 64, borderRadius: "50%", border: "4px solid #fff",
+    background: bg, cursor: "pointer", padding: 0,
+  });
+  const smallBtn = {
+    padding: "8px 14px", borderRadius: 20, border: "none", cursor: "pointer",
+    fontSize: 13, fontWeight: 600, background: "rgba(255,255,255,0.18)", color: "#fff",
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "#000", display: "flex", flexDirection: "column" }}>
+      {/* Top bar */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 12, gap: 8 }}>
+        <button type="button" style={smallBtn} onClick={onClose} disabled={recording}>✕ Close</button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button type="button" disabled={recording} onClick={() => setMode("photo")}
+            style={{ ...smallBtn, background: mode === "photo" ? "#1a73e8" : smallBtn.background }}>📷 Photo</button>
+          <button type="button" disabled={recording} onClick={() => setMode("video")}
+            style={{ ...smallBtn, background: mode === "video" ? "#1a73e8" : smallBtn.background }}>🎥 Video</button>
+        </div>
+        <button type="button" disabled={recording} style={smallBtn}
+          onClick={() => setFacing((f) => (f === "environment" ? "user" : "environment"))}>🔄 Flip</button>
+      </div>
+
+      {/* Live preview */}
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", position: "relative" }}>
+        <video ref={videoRef} playsInline muted autoPlay style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+        {recording && (
+          <div style={{ position: "absolute", top: 10, left: 12, color: "#fff", background: "rgba(229,57,53,0.9)", padding: "3px 10px", borderRadius: 12, fontSize: 13, fontWeight: 700 }}>
+            ● {secs}s / {VIDEO_MAX_SECONDS}s
+          </div>
+        )}
+      </div>
+
+      {err && <div style={{ color: "#ff8a80", textAlign: "center", fontSize: 13, padding: "6px 16px" }}>{err}</div>}
+
+      {/* Shutter */}
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: 20 }}>
+        {working ? (
+          <span style={{ color: "#fff" }}>Processing...</span>
+        ) : mode === "photo" ? (
+          <button type="button" onClick={takePhoto} style={circleBtn("#fff")} title="Take photo" />
+        ) : recording ? (
+          <button type="button" onClick={stopRecording} style={circleBtn("#e53935")} title="Stop">
+            <span style={{ display: "block", width: 22, height: 22, background: "#fff", margin: "0 auto", borderRadius: 3 }} />
+          </button>
+        ) : (
+          <button type="button" onClick={startRecording} style={circleBtn("#e53935")} title="Record" />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MediaField({ fieldName, value, onChange }) {
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState("");
-  const files = Array.isArray(value) ? value : value ? [value] : []; // supports old single base64 value
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const uploadRef = useRef(null);
+  const fallbackCamRef = useRef(null);
 
+  const files = Array.isArray(value) ? value : value ? [value] : []; // supports old single base64 value
+  const limitReached = files.length >= MEDIA_MAX_FILES;
+
+  // Normal upload (gallery / files) and native-camera fallback
   const handleFiles = async (e) => {
     const picked = Array.from(e.target.files || []);
     e.target.value = ""; // allow picking the same file again
@@ -214,7 +408,7 @@ function MediaField({ fieldName, value, onChange }) {
           name: file.name,
           type: isImage ? "image/jpeg" : file.type,
           size: file.size,
-          data, // base64 data URL
+          data,
         });
       }
       if (added.length) onChange(fieldName, [...files, ...added]);
@@ -223,6 +417,29 @@ function MediaField({ fieldName, value, onChange }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  // Item captured from the in-browser camera
+  const handleCaptured = (item) => {
+    setCameraOpen(false);
+    setLocalError("");
+    onChange(fieldName, [...files, item]);
+  };
+
+  const openCamera = () => {
+    setMenuOpen(false);
+    setLocalError("");
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      setCameraOpen(true);
+    } else {
+      // Old browser / non-HTTPS: fall back to the phone's native camera
+      fallbackCamRef.current && fallbackCamRef.current.click();
+    }
+  };
+
+  const openUpload = () => {
+    setMenuOpen(false);
+    uploadRef.current && uploadRef.current.click();
   };
 
   const removeFile = (i) => onChange(fieldName, files.filter((_, idx) => idx !== i));
@@ -236,26 +453,53 @@ function MediaField({ fieldName, value, onChange }) {
     return <div style={{ fontSize: 28, textAlign: "center" }}>📄</div>;
   };
 
+  const optionStyle = {
+    display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 14px",
+    border: "none", background: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600,
+    color: "#333", textAlign: "left",
+  };
+
   return (
     <div>
-      <label
-        style={{
-          display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 16px",
-          border: "1.5px dashed #1a73e8", color: "#1a73e8", background: "#f5f8ff",
-          borderRadius: 8, cursor: busy ? "default" : "pointer", fontSize: 13.5, fontWeight: 600,
-          opacity: files.length >= MEDIA_MAX_FILES ? 0.5 : 1,
-        }}
-      >
-        📎 {busy ? "Processing..." : "Upload photo / video / file"}
-        <input
-          type="file"
-          accept={MEDIA_ACCEPT}
-          multiple
-          disabled={busy || files.length >= MEDIA_MAX_FILES}
-          onChange={handleFiles}
-          style={{ display: "none" }}
-        />
-      </label>
+      {/* Single Add button -> 2 options (Camera / Upload) */}
+      <div style={{ position: "relative", display: "inline-block" }}>
+        <button
+          type="button"
+          disabled={busy || limitReached}
+          onClick={() => setMenuOpen((o) => !o)}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 16px",
+            border: "1.5px dashed #1a73e8", color: "#1a73e8", background: "#f5f8ff",
+            borderRadius: 8, cursor: busy || limitReached ? "default" : "pointer",
+            fontSize: 13.5, fontWeight: 600, opacity: busy || limitReached ? 0.5 : 1,
+          }}
+        >
+          📎 {busy ? "Processing..." : "Add photo / video"} ▾
+        </button>
+
+        {menuOpen && (
+          <>
+            {/* click-outside backdrop */}
+            <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 10 }} />
+            <div
+              style={{
+                position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 11, minWidth: 200,
+                background: "#fff", border: "1px solid #ddd", borderRadius: 8,
+                boxShadow: "0 4px 14px rgba(0,0,0,0.15)", overflow: "hidden",
+              }}
+            >
+              <button type="button" onClick={openCamera} style={optionStyle}>📷 Camera</button>
+              <div style={{ height: 1, background: "#eee" }} />
+              <button type="button" onClick={openUpload} style={optionStyle}>🖼️ Upload from device</button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Hidden inputs */}
+      <input ref={uploadRef} type="file" accept={MEDIA_ACCEPT} multiple onChange={handleFiles} style={{ display: "none" }} />
+      <input ref={fallbackCamRef} type="file" accept="image/*,video/*" capture="environment" onChange={handleFiles} style={{ display: "none" }} />
+
       <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>
         Max {MEDIA_MAX_FILES} files • Video/audio/PDF up to {MEDIA_MAX_MB} MB • Photos are auto-compressed
       </div>
@@ -284,6 +528,14 @@ function MediaField({ fieldName, value, onChange }) {
             </div>
           ))}
         </div>
+      )}
+
+      {cameraOpen && (
+        <CameraModal
+          maxMB={MEDIA_MAX_MB}
+          onCapture={handleCaptured}
+          onClose={() => setCameraOpen(false)}
+        />
       )}
     </div>
   );

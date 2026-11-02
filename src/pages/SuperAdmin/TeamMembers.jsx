@@ -87,15 +87,6 @@ export default function TeamMembers() {
     setShowModal(true);
   };
 
-  const toggleProject = (projectId) => {
-    setFormData(prev => ({
-      ...prev,
-      assignedProjects: prev.assignedProjects.includes(projectId)
-        ? prev.assignedProjects.filter(id => id !== projectId)
-        : [...prev.assignedProjects, projectId]
-    }));
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.firstName || !formData.lastName || !formData.email) {
@@ -108,26 +99,21 @@ export default function TeamMembers() {
     }
     setLoading(true);
     try {
+      // Backend validates the project and keeps User + Project in sync.
+      const payload = {
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        phone: formData.phone,
+        role: formData.role,
+        assignedProjects: formData.assignedProjects,
+      };
+
       if (editingMember) {
-        await api.put(`/users/${editingMember._id}`, {
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          email: formData.email,
-          phone: formData.phone,
-          role: formData.role,
-          assignedProjects: formData.assignedProjects
-        });
+        await api.put(`/users/${editingMember._id}`, payload);
         toast.success('Team member updated successfully');
       } else {
-        await api.post('/users/create-team-member', {
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          email: formData.email,
-          password: formData.password,
-          phone: formData.phone,
-          roleName: formData.role,
-          assignedProjects: formData.assignedProjects
-        });
+        await api.post('/users/create-team-member', { ...payload, password: formData.password });
         toast.success('Team member created successfully');
       }
       setShowModal(false);
@@ -361,16 +347,20 @@ export default function TeamMembers() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
                 </div>
               )}
-              <div><label className="block text-sm font-medium text-gray-700 mb-2">Assign Projects</label>
-                <div className="space-y-2 max-h-32 overflow-y-auto border border-gray-200 rounded-lg p-3">
-                  {projects.map(project => (
-                    <label key={project._id} className="flex items-center gap-3 cursor-pointer">
-                      <input type="checkbox" checked={formData.assignedProjects.includes(project._id)} onChange={() => toggleProject(project._id)}
-                        className="w-4 h-4 text-blue-600 rounded shrink-0" />
-                      <span className="text-sm text-gray-700 break-words">{project.name}</span>
-                    </label>
+              {/* One project per user (backend rule), so a single select instead of checkboxes */}
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Assign Project</label>
+                <select
+                  value={formData.assignedProjects[0] || ''}
+                  onChange={(e) =>
+                    setFormData({ ...formData, assignedProjects: e.target.value ? [e.target.value] : [] })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">No project</option>
+                  {projects.map((p) => (
+                    <option key={p._id} value={p._id}>{p.name}</option>
                   ))}
-                </div>
+                </select>
               </div>
               <div className="flex flex-col xs:flex-row gap-3 pt-4">
                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
