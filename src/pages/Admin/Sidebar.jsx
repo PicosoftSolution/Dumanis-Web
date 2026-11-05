@@ -11,7 +11,8 @@ import {
   ChevronRight,
   FormInput,
   PenSquare,
-  Layers
+  Layers,
+  CreditCard
 } from 'lucide-react';
 import logo from '../../assets/logo.jpg';
 
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { key: 'team', label: 'Team Members', icon: Users },
   { key: 'entries', label: 'All Entries', icon: FileText },
   { key: 'reports', label: 'Reports', icon: BarChart3 },
+  { key: 'plans', label: 'Plans & Pricing', icon: CreditCard },
 ];
 
 export default function Sidebar({ active, onChange, user, onLogout }) {

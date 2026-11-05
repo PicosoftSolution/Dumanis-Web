@@ -10,6 +10,7 @@ import Forms from '../SuperAdmin/Forms';
 import DynamicFormBuilder from '../SuperAdmin/DynamicFormBuilder';
 import FormResponsesViewer from '../SuperAdmin/FormResponsesViewer';
 import TeamLeads from './Teamleads'; // NEW: change path if your TeamLeads.jsx is in another folder
+import PricingPlans from './PricingPlans'; 
 import api from '../../api/axios';
 
 // Admin Portal — same shell/pages as the Super Admin portal, but every API
@@ -89,6 +90,8 @@ export default function AdminPortal() {
         return <Entries submissions={submissions} projects={projects} />;
       case 'reports':
         return <Reports stats={stats} projects={projects} users={users} submissions={submissions} />;
+      case 'plans':   // NEW
+        return <PricingPlans currentPlan="free" />;
       default:
         return <Dashboard stats={stats} projects={projects} users={users} user={user} />;
     }
