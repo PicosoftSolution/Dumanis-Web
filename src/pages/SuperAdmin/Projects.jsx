@@ -1,13 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Edit2, Power, Search, Folder, MapPin, Calendar, CheckCircle, XCircle, X, Users, UserPlus, Navigation, ClipboardList } from 'lucide-react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import MapPicker from '../../components/MapPicker';
+import { fetchBoundary, fetchPlacePolygon, pointInRings, parseKml } from '../../utils/geo';
 
 // `enabledForms` holds the names of the forms created for this project
 // (e.g. "Hospital", "School"). They are managed in the "Forms" section of
 // the create/edit modal, and show up on the Entry page for field users.
+//
+// `areaOfInterest` = { name, rings } : the boundary polygon of the place the
+// admin searches / selects on the map (fetched from OpenStreetMap), draws by
+// hand, or imports from a .kml file. The red polygon is drawn and LOCKED: the
+// pin can only move inside it.
+// To use another area the admin must click "Change Area of Interest".
+// Field users can later only record locations inside it.
 const EMPTY_FORM = {
   name: '',
   description: '',
@@ -16,6 +24,7 @@ const EMPTY_FORM = {
   enabledForms: [],
   assignedAdminIds: [],
   assignedUserIds: [],
+  areaOfInterest: null,
   location: { lat: '', lng: '', address: '' }
 };
 
@@ -38,6 +47,15 @@ export default function Projects() {
   const [fetching, setFetching] = useState(true);
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [newFormName, setNewFormName] = useState(''); // input for the "Forms" section
+  const [drawing, setDrawing] = useState(false); // draw-boundary mode
+  const [mapKey, setMapKey] = useState(0); // remounts the map after "Change Area of Interest"
+  const [boundaryLoading, setBoundaryLoading] = useState(false);
+  const kmlInputRef = useRef(null); // hidden file input for "Import KML"
+
+  // Currently selected Area of Interest (red boundary)
+  const selectedAoi = formData.areaOfInterest;
+  // Once an area is set, the map is locked to it
+  const aoiLocked = !!selectedAoi?.rings?.length;
 
   // Fetch projects from API
   const fetchProjects = async () => {
@@ -104,6 +122,7 @@ export default function Projects() {
         enabledForms: project.enabledForms || [],
         assignedAdminIds: (project.assignedAdmins || []).map(a => a._id || a),
         assignedUserIds: (project.assignedUsers || []).map(u => u._id || u),
+        areaOfInterest: project.areaOfInterest || null,
         location: project.location || { lat: '', lng: '', address: '' }
       });
       fetchAssignableUsers(project._id);
@@ -165,62 +184,174 @@ export default function Projects() {
     }));
   };
 
-  const getCurrentLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-
-          try {
-            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
-            const data = await response.json();
-            setFormData(prev => ({
-              ...prev,
-              location: { lat, lng, address: data.display_name || '' }
-            }));
-            toast.success('Location captured successfully');
-          } catch (error) {
-            setFormData(prev => ({
-              ...prev,
-              location: { ...prev.location, lat, lng }
-            }));
-            toast.success('Location coordinates captured');
-          }
-        },
-        () => {
-          toast.error('Unable to get location. Please check permissions.');
+  // Get a REAL boundary polygon and show it in red.
+  //  - `place` (selected search result) -> its own polygon from OpenStreetMap
+  //  - otherwise / no polygon           -> the ward / mandal / city polygon around the point
+  //  - nothing found anywhere           -> admin draws the polygon on the map
+  const loadBoundary = async (la, ln, place) => {
+    setBoundaryLoading(true);
+    try {
+      if (place) {
+        const rings = await fetchPlacePolygon(place);
+        if (rings.length > 0) {
+          const name = place.name || (place.display_name || '').split(',')[0] || 'Selected area';
+          setFormData(prev => ({ ...prev, areaOfInterest: { name, rings } }));
+          return;
         }
-      );
-    } else {
-      toast.error('Geolocation is not supported by this browser.');
+      }
+      const aoi = await fetchBoundary(la, ln);
+      if (aoi) {
+        setFormData(prev => ({ ...prev, areaOfInterest: aoi }));
+        return;
+      }
+      toast('No boundary polygon found for this place. Draw it on the map (tap the corner points, then press Finish) or import a KML file.', { icon: '✏️', duration: 7000 });
+      setDrawing(true);
+    } finally {
+      setBoundaryLoading(false);
     }
   };
 
-  const handleMapChange = async (la, ln, address) => {
-    if (address) {
-      setFormData(prev => ({
+  // Admin finished drawing the polygon manually
+  const handleDrawFinish = (pts) => {
+    if (pts.length < 3) {
+      toast.error('Add at least 3 points');
+      return;
+    }
+    const ring = [...pts, pts[0]]; // close the polygon
+    const cLat = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
+    const cLng = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+    setFormData(prev => {
+      const hasPin = prev.location.lat !== '' && prev.location.lng !== '';
+      const pinInside = hasPin && pointInRings(prev.location.lat, prev.location.lng, [ring]);
+      return {
         ...prev,
-        location: { lat: la.toFixed(6), lng: ln.toFixed(6), address }
-      }));
+        areaOfInterest: {
+          name: prev.location.address?.split(',')[0] || 'Custom area',
+          rings: [ring],
+          source: 'drawn'
+        },
+        // keep the pin if it is inside the drawn polygon, otherwise move it to the middle
+        location: pinInside
+          ? prev.location
+          : { ...prev.location, lat: cLat.toFixed(6), lng: cLng.toFixed(6) }
+      };
+    });
+    setDrawing(false);
+    toast.success('Area of Interest set');
+  };
+
+  // Admin imported a .kml file -> its polygon becomes the red locked boundary
+  const handleKmlFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allows picking the same file again
+    if (!file) return;
+
+    if (/\.kmz$/i.test(file.name)) {
+      toast.error('KMZ is not supported. Please extract it and upload the .kml file.');
+      return;
+    }
+    if (!/\.kml$/i.test(file.name)) {
+      toast.error('Please choose a .kml file');
       return;
     }
 
+    try {
+      const text = await file.text();
+      const aoi = parseKml(text, file.name.replace(/\.kml$/i, ''));
+
+      // centre point (used when there is no pin yet, or the pin is outside)
+      const ring = aoi.rings[0];
+      const pts = ring.slice(0, -1);
+      let cLat = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+      let cLng = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+      if (!pointInRings(cLat, cLng, aoi.rings)) [cLat, cLng] = ring[0]; // concave shape fallback
+
+      setDrawing(false);
+      setFormData(prev => {
+        const hasPin = prev.location.lat !== '' && prev.location.lng !== '';
+        const pinInside = hasPin && pointInRings(prev.location.lat, prev.location.lng, aoi.rings);
+        return {
+          ...prev,
+          areaOfInterest: aoi,
+          location: pinInside
+            ? prev.location
+            : {
+                ...prev.location,
+                lat: Number(cLat).toFixed(6),
+                lng: Number(cLng).toFixed(6),
+                address: prev.location.address || aoi.name
+              }
+        };
+      });
+      toast.success(`KML imported: ${aoi.name}`);
+    } catch (err) {
+      toast.error(err.message || 'Failed to read KML file');
+    }
+  };
+
+  // Called whenever the admin picks a point on the map (click, drag, search, GPS).
+  const handleMapChange = async (la, ln, address, extra) => {
+    const latStr = Number(la).toFixed(6);
+    const lngStr = Number(ln).toFixed(6);
+
     setFormData(prev => ({
       ...prev,
-      location: { ...prev.location, lat: la.toFixed(6), lng: ln.toFixed(6) }
+      location: { lat: latStr, lng: lngStr, address: address || prev.location.address }
     }));
 
-    try {
-      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${la}&lon=${ln}`);
-      const data = await response.json();
-      setFormData(prev => ({
-        ...prev,
-        location: { ...prev.location, address: data.display_name || prev.location.address }
-      }));
-    } catch (error) {
-      console.error('Reverse geocoding failed:', error);
+    // Only the FIRST selection sets the red polygon. When it is already locked,
+    // moving the pin inside it must not replace the polygon.
+    if (!aoiLocked) loadBoundary(la, ln, extra?.place);
+
+    if (!address) {
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${la}&lon=${ln}`);
+        const data = await response.json();
+        setFormData(prev => ({
+          ...prev,
+          location: { ...prev.location, address: data.display_name || prev.location.address }
+        }));
+      } catch (error) {
+        console.error('Reverse geocoding failed:', error);
+      }
     }
+  };
+
+  // Unlock: remove the red polygon + pin so a different area can be searched
+  const handleChangeAoi = () => {
+    setFormData(prev => ({
+      ...prev,
+      areaOfInterest: null,
+      location: { lat: '', lng: '', address: '' }
+    }));
+    setDrawing(false);
+    setMapKey(k => k + 1); // fresh map + empty search bar
+  };
+
+  const showOutsideAlert = () => {
+    toast.error('Outside the selected Area of Interest. To use another area, click "Change Area of Interest".', { duration: 4500 });
+  };
+
+  // "Use current location" button -> same flow as picking on the map
+  const getCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      toast.error('Geolocation is not supported by this browser.');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const la = position.coords.latitude;
+        const ln = position.coords.longitude;
+        if (aoiLocked && !pointInRings(la, ln, selectedAoi.rings)) {
+          showOutsideAlert();
+          return;
+        }
+        handleMapChange(la, ln);
+      },
+      () => {
+        toast.error('Unable to get location. Please check permissions.');
+      }
+    );
   };
 
   const handleSubmit = async (e) => {
@@ -231,6 +362,10 @@ export default function Projects() {
     }
     if (!formData.startDate || !formData.endDate) {
       toast.error('Start date and end date are required');
+      return;
+    }
+    if (!formData.areaOfInterest?.rings?.length) {
+      toast.error('Pick a location on the map or import a KML so the Area of Interest (red boundary) is set');
       return;
     }
     setLoading(true);
@@ -388,6 +523,13 @@ export default function Projects() {
                   </div>
                 )}
 
+                {project.areaOfInterest?.rings?.length > 0 && (
+                  <div className="flex items-center gap-1 text-xs text-red-600 font-medium mb-2">
+                    <MapPin className="w-3 h-3" />
+                    <span>Area of Interest: {project.areaOfInterest.name}</span>
+                  </div>
+                )}
+
                 {project.location?.address && (
                   <div className="flex items-center gap-1 text-xs text-gray-500 mb-3">
                     <MapPin className="w-3 h-3 text-red-500" />
@@ -536,12 +678,72 @@ export default function Projects() {
                   </div>
                 </div>
 
-               {/* Location
+                {/* Area of Interest — search a location, draw, or import KML. The red polygon is added and locked */}
                 <div className="pt-1 border-t border-gray-100">
-                  <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 mt-4 mb-2">
+                  <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 mt-4 mb-1">
                     <MapPin className="w-3.5 h-3.5 text-gray-400" />
-                    Location
+                    Area of Interest *
                   </label>
+                  <p className="text-[11px] text-gray-400 mb-2">
+                    Search for a location in the map search bar (for example "Kukatpally") and select it, or import
+                    a KML file. Its red polygon is added and locked: the pin can only be moved inside it, and field
+                    users can only record survey locations inside it.
+                  </p>
+
+                  {/* hidden file input for "Import KML" */}
+                  <input
+                    ref={kmlInputRef}
+                    type="file"
+                    accept=".kml,application/vnd.google-earth.kml+xml"
+                    onChange={handleKmlFile}
+                    className="hidden"
+                  />
+
+                  {boundaryLoading ? (
+                    <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-2">
+                      Loading boundary...
+                    </p>
+                  ) : aoiLocked ? (
+                    <div className="flex items-center justify-between gap-2 text-xs bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-2">
+                      <span className="font-medium text-green-700">
+                        🔒 Area of Interest: {selectedAoi.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleChangeAoi}
+                        className="shrink-0 px-2.5 py-1 rounded-md bg-white border border-red-200 text-red-600 font-medium hover:bg-red-50 transition-colors"
+                      >
+                        Change Area of Interest
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
+                      <span>
+                        {drawing
+                          ? 'Drawing mode: tap the corner points of the boundary on the map, then press Finish.'
+                          : 'No Area of Interest yet. Search a location in the map search bar below, import a KML file, or draw the boundary.'}
+                      </span>
+                      {!drawing && (
+                        <div className="shrink-0 flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => kmlInputRef.current?.click()}
+                            className="px-2.5 py-1 rounded-md bg-white border border-amber-300 text-amber-800 font-medium hover:bg-amber-100 transition-colors"
+                          >
+                            📂 Import KML
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDrawing(true)}
+                            className="px-2.5 py-1 rounded-md bg-white border border-amber-300 text-amber-800 font-medium hover:bg-amber-100 transition-colors"
+                          >
+                            ✏️ Draw boundary
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex gap-2 mb-2">
                     <input
                       type="text" placeholder="Address"
@@ -559,27 +761,34 @@ export default function Projects() {
                   </div>
                   <div className="grid grid-cols-2 gap-2 mb-2">
                     <input
-                      type="text" placeholder="Latitude"
+                      type="text" placeholder="Latitude" readOnly
                       value={formData.location.lat}
-                      onChange={(e) => setFormData({ ...formData, location: { ...formData.location, lat: e.target.value } })}
-                      className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-colors"
+                      className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-600 focus:outline-none"
                     />
                     <input
-                      type="text" placeholder="Longitude"
+                      type="text" placeholder="Longitude" readOnly
                       value={formData.location.lng}
-                      onChange={(e) => setFormData({ ...formData, location: { ...formData.location, lng: e.target.value } })}
-                      className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-colors"
+                      className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-600 focus:outline-none"
                     />
                   </div>
-                  <div className="rounded-lg overflow-hidden border border-gray-200" style={{ height: '420px' }}>
+                  <div className="rounded-lg overflow-hidden border border-gray-200">
                     <MapPicker
+                      key={mapKey}
                       lat={formData.location.lat}
                       lng={formData.location.lng}
                       height={420}
+                      boundary={selectedAoi?.rings}
+                      restrict={aoiLocked}
+                      fitBoundary
+                      outsideMessage="⚠ Outside the selected Area of Interest. Click “Change Area of Interest” to select another area."
+                      onOutside={showOutsideAlert}
+                      drawing={drawing}
+                      onDrawFinish={handleDrawFinish}
+                      onDrawCancel={() => setDrawing(false)}
                       onChange={handleMapChange}
                     />
                   </div>
-                </div>  */}
+                </div>
 
                 {/* Assign Admins (Super Admin only) */}
                 {isSuperAdmin && (

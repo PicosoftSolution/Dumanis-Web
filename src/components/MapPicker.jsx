@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Polygon, Polyline, CircleMarker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { pointInRings } from '../utils/geo';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -11,7 +12,6 @@ L.Icon.Default.mergeOptions({
 });
 
 // MapTiler key comes from .env  ->  VITE_MAPTILER_KEY=your_key
-// (If you use Create React App, use process.env.REACT_APP_MAPTILER_KEY instead)
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY;
 
 // Highest zoom the map allows (tiles are stretched beyond maxNativeZoom)
@@ -43,6 +43,8 @@ const TILE_LAYERS = {
   satellite: MAPTILER_KEY ? MAPTILER_SATELLITE : ESRI_SATELLITE,
 };
 
+const NO_BOUNDARY = []; // stable reference so effects don't re-run
+
 function ClickToPlace({ onPick }) {
   useMapEvents({
     click(e) {
@@ -72,11 +74,7 @@ function ResizeFix({ trigger }) {
   return null;
 }
 
-// Keeps the pin in view. The map's `center` prop is only read once on mount,
-// so when the device GPS arrives AFTER the map has rendered (or the user taps
-// "Use my current GPS"), the pin used to be placed far outside the visible
-// area. This focuses the map on the first real position, and afterwards pans
-// only if the pin ends up off-screen (so dragging/tapping isn't disturbed).
+// Keeps the pin in view (first real position -> focus, later -> pan only if off-screen)
 function FollowPosition({ position }) {
   const map = useMap();
   const firstFocus = useRef(true);
@@ -99,6 +97,17 @@ function FollowPosition({ position }) {
   return null;
 }
 
+// Zooms to show the whole red boundary (only when the boundary changes)
+function FitBoundary({ boundary }) {
+  const map = useMap();
+  const sig = boundary.length ? `${boundary.length}-${boundary[0].length}-${boundary[0][0]}` : '';
+  useEffect(() => {
+    if (sig) map.fitBounds(boundary.flat(), { padding: [20, 20] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig, map]);
+  return null;
+}
+
 const MaximizeIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="15 3 21 3 21 9" />
@@ -117,16 +126,55 @@ const MinimizeIcon = () => (
   </svg>
 );
 
-export default function MapPicker({ lat, lng, onChange, height = 260, readOnly = false }) {
+/**
+ * Props
+ *  lat, lng     current pin
+ *  onChange     (lat, lng, address?, { place }?) => void   (place = selected search result)
+ *  readOnly     no editing
+ *  boundary     red KML boundary: array of rings [[lat,lng],...]
+ *  restrict     true  -> pins OUTSIDE the boundary are rejected (survey / entry page)
+ *               false -> any location can be picked (project creation)
+ *  fitBoundary  true  -> zoom to show the whole boundary
+ *  outsideMessage  text of the red warning shown when a pin is rejected
+ *  onOutside    () => void  called every time a pin is rejected (e.g. to show a toast)
+ *  drawing      true -> draw-boundary mode: taps add polygon corners instead of moving the pin
+ *  onDrawFinish (points) => void   points = [[lat,lng],...] (at least 3)
+ *  onDrawCancel () => void
+ */
+export default function MapPicker({
+  lat,
+  lng,
+  onChange,
+  height = 260,
+  readOnly = false,
+  boundary = NO_BOUNDARY,
+  restrict = false,
+  fitBoundary = false,
+  outsideMessage = '⚠ This location is outside the project Area of Interest (red boundary).',
+  onOutside,
+  drawing = false,
+  onDrawFinish,
+  onDrawCancel,
+}) {
   const [view, setView] = useState('satellite');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const [searchMsg, setSearchMsg] = useState('');
   const [flyTarget, setFlyTarget] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [outsideMsg, setOutsideMsg] = useState(false);
+  const [drawPoints, setDrawPoints] = useState([]);
   const debounceRef = useRef(null);
+
+  // each time draw mode starts, begin with an empty polygon
+  useEffect(() => {
+    if (drawing) setDrawPoints([]);
+  }, [drawing]);
+
+  const isOutside = (la, ln) => restrict && boundary.length > 0 && !pointInRings(la, ln, boundary);
 
   useEffect(() => {
     const goOnline = () => setIsOnline(true);
@@ -154,12 +202,13 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
     };
   }, [isFullscreen]);
 
-  // Type debounce  Nominatim search call
+  // Typing debounce -> Nominatim search
   useEffect(() => {
     if (readOnly) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (query.trim().length < 3) {
       setResults([]);
+      setSearchMsg('');
       return;
     }
     debounceRef.current = setTimeout(async () => {
@@ -168,11 +217,15 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
         const res = await fetch(
           `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&q=${encodeURIComponent(query)}`
         );
+        if (!res.ok) throw new Error('Search failed ' + res.status);
         const data = await res.json();
         setResults(data || []);
         setShowResults(true);
+        setSearchMsg(data && data.length ? '' : 'No results found. Try a different name.');
       } catch (err) {
+        console.error('Location search error:', err);
         setResults([]);
+        setSearchMsg('Search failed. Check your internet and try again.');
       } finally {
         setSearching(false);
       }
@@ -180,13 +233,34 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
     return () => clearTimeout(debounceRef.current);
   }, [query, readOnly]);
 
+  const warnOutside = () => {
+    onOutside && onOutside();
+    setOutsideMsg(true);
+    setTimeout(() => setOutsideMsg(false), 3000);
+  };
+
+  // EVERY pin change (click / drag) goes through here.
+  // With `restrict`, a point outside the red boundary is rejected.
+  const safeChange = (la, ln, address, extra) => {
+    if (isOutside(la, ln)) {
+      warnOutside();
+      return;
+    }
+    onChange && onChange(la, ln, address, extra);
+  };
+
   const pickResult = (place) => {
     const la = parseFloat(place.lat);
     const ln = parseFloat(place.lon);
-    setFlyTarget({ lat: la, lng: ln });
     setShowResults(false);
     setQuery(place.display_name);
-    onChange && onChange(la, ln, place.display_name);
+    if (isOutside(la, ln)) {
+      warnOutside();
+      return;
+    }
+    setFlyTarget({ lat: la, lng: ln });
+    // 4th argument: the selected search result (parent fetches its polygon)
+    onChange && onChange(la, ln, place.display_name, { place });
   };
 
   const hasPosition = lat !== '' && lng !== '' && lat !== undefined && lng !== undefined && !Number.isNaN(Number(lat));
@@ -226,6 +300,9 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
           {searching && (
             <span style={{ position: 'absolute', right: 18, top: 18, fontSize: 11, color: '#999' }}>Searching...</span>
           )}
+          {searchMsg && !searching && (
+            <p style={{ margin: '6px 2px 0', fontSize: 11.5, color: '#c62828' }}>{searchMsg}</p>
+          )}
           {showResults && results.length > 0 && (
             <div style={{ position: 'absolute', left: 8, right: 8, top: '100%', background: '#fff', border: '1px solid #ddd', borderRadius: 6, maxHeight: 180, overflowY: 'auto', zIndex: 1000, boxShadow: '0 4px 10px rgba(0,0,0,0.08)' }}>
               {results.map((place) => (
@@ -235,6 +312,12 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
                   onClick={() => pickResult(place)}
                   style={{ padding: '8px 10px', fontSize: 12.5, cursor: 'pointer', borderBottom: '1px solid #f0f0f0' }}
                 >
+                  <span
+                    title={place.osm_type === 'node' ? 'Point only' : 'Has an area boundary'}
+                    style={{ float: 'right', marginLeft: 8, fontSize: 10, fontWeight: 600, color: place.osm_type === 'node' ? '#999' : '#2e7d32' }}
+                  >
+                    {place.osm_type === 'node' ? 'point' : 'area'}
+                  </span>
                   {place.display_name}
                 </div>
               ))}
@@ -243,7 +326,7 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
         </div>
       )}
 
-      {/* Map area: zoom +/- (top-left) and fullscreen toggle (top-right) */}
+      {/* Map area */}
       <div
         style={{
           position: 'relative',
@@ -269,24 +352,88 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
           <FlyTo target={flyTarget} />
           <ResizeFix trigger={isFullscreen} />
           <FollowPosition position={hasPosition ? position : null} />
+
+          {/* Red KML boundary */}
+          {boundary.map((ring, i) => (
+            <Polygon
+              key={i}
+              positions={ring}
+              interactive={false}
+              pathOptions={{ color: '#ff0000', weight: 3, fillOpacity: 0.04 }}
+            />
+          ))}
+          {fitBoundary && <FitBoundary boundary={boundary} />}
+
+          {/* Polygon being drawn */}
+          {drawing && drawPoints.length >= 3 && (
+            <Polygon positions={drawPoints} interactive={false} pathOptions={{ color: '#ff0000', weight: 3, dashArray: '6 6', fillOpacity: 0.08 }} />
+          )}
+          {drawing && drawPoints.length === 2 && (
+            <Polyline positions={drawPoints} interactive={false} pathOptions={{ color: '#ff0000', weight: 3, dashArray: '6 6' }} />
+          )}
+          {drawing && drawPoints.map((pt, i) => (
+            <CircleMarker key={i} center={pt} radius={5} interactive={false} pathOptions={{ color: '#ff0000', fillColor: '#fff', fillOpacity: 1, weight: 2 }} />
+          ))}
+
           {hasPosition && (
             <Marker
+              key={`${position[0]}-${position[1]}`}
               position={position}
-              draggable={!readOnly}
+              draggable={!readOnly && !drawing}
               eventHandlers={
                 readOnly
                   ? undefined
                   : {
                       dragend: (e) => {
                         const p = e.target.getLatLng();
-                        onChange && onChange(p.lat, p.lng);
+                        safeChange(p.lat, p.lng);
                       },
                     }
               }
             />
           )}
-          {!readOnly && <ClickToPlace onPick={(la, ln) => onChange && onChange(la, ln)} />}
+          {!readOnly && (
+            <ClickToPlace
+              onPick={(la, ln) =>
+                drawing ? setDrawPoints((pts) => [...pts, [la, ln]]) : safeChange(la, ln)
+              }
+            />
+          )}
         </MapContainer>
+
+        {outsideMsg && (
+          <div style={{ position: 'absolute', left: 10, right: 54, bottom: 10, zIndex: 1000, background: '#ffebee', color: '#c62828', fontSize: 12, fontWeight: 600, padding: '8px 10px', borderRadius: 6, border: '1px solid #ef9a9a' }}>
+            {outsideMessage}
+          </div>
+        )}
+
+        {drawing && (
+          <div style={{ position: 'absolute', left: 10, top: 10, zIndex: 1000, display: 'flex', gap: 6 }}>
+            <button
+              type="button"
+              disabled={drawPoints.length < 3}
+              onClick={() => onDrawFinish && onDrawFinish(drawPoints)}
+              style={{ padding: '6px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 6, cursor: drawPoints.length < 3 ? 'not-allowed' : 'pointer', background: drawPoints.length < 3 ? '#9e9e9e' : '#2e7d32', color: '#fff' }}
+            >
+              Finish ({drawPoints.length})
+            </button>
+            <button
+              type="button"
+              disabled={drawPoints.length === 0}
+              onClick={() => setDrawPoints((pts) => pts.slice(0, -1))}
+              style={{ padding: '6px 12px', fontSize: 12, fontWeight: 600, border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', background: '#fff', color: '#333' }}
+            >
+              Undo
+            </button>
+            <button
+              type="button"
+              onClick={() => onDrawCancel && onDrawCancel()}
+              style={{ padding: '6px 12px', fontSize: 12, fontWeight: 600, border: '1px solid #ef9a9a', borderRadius: 6, cursor: 'pointer', background: '#fff', color: '#c62828' }}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
 
         <button
           type="button"
@@ -322,7 +469,11 @@ export default function MapPicker({ lat, lng, onChange, height = 260, readOnly =
       )}
       {!readOnly && (
         <p style={{ fontSize: 11, color: '#888', padding: '6px 10px', margin: 0, background: '#fafafa', flexShrink: 0 }}>
-          Tap the map to drop a pin or search above, or drag the marker to fine-tune it.
+          {drawing
+            ? 'Tap on the map to add the corner points of the boundary (at least 3), then press Finish.'
+            : restrict && boundary.length > 0
+            ? 'The pin is locked inside the red boundary. Tap inside it or drag the marker to fine-tune.'
+            : 'Tap the map to drop a pin or search above, or drag the marker to fine-tune it.'}
         </p>
       )}
     </div>
