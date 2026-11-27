@@ -491,112 +491,114 @@ export default function Projects() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 divide-y divide-gray-100 overflow-hidden">
           {filteredProjects.map((project) => (
-            <div key={project._id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
-              <div className="p-6">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Folder className="w-5 h-5 text-blue-600" />
-                    <h3 className="font-semibold text-gray-900">{project.name}</h3>
-                  </div>
-                  {canManage && (
-                    <div className="flex gap-1">
-                      <button onClick={() => handleOpenModal(project)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => toggleStatus(project)} className={`p-1.5 rounded-lg ${project.isActive ? 'text-red-500 hover:bg-red-50' : 'text-green-500 hover:bg-green-50'}`}>
-                        <Power className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
+            <div
+              key={project._id}
+              className="p-4 flex flex-col lg:flex-row lg:items-start gap-3 lg:gap-6 hover:bg-gray-50 transition-colors"
+            >
+              {/* Name + description + dates */}
+              <div className="lg:w-1/4 min-w-0">
+                <div className="flex items-center gap-2">
+                  <Folder className="w-5 h-5 text-blue-600 shrink-0" />
+                  <h3 className="font-semibold text-gray-900 truncate">{project.name}</h3>
                 </div>
-
                 {project.description && (
-                  <p className="text-gray-600 text-sm mb-3 line-clamp-2">{project.description}</p>
+                  <p className="text-gray-600 text-sm mt-1 line-clamp-2">{project.description}</p>
                 )}
-
                 {project.startDate && (
-                  <div className="flex items-center gap-1 text-xs text-gray-500 mb-2">
+                  <div className="flex items-center gap-1 text-xs text-gray-500 mt-2">
                     <Calendar className="w-3 h-3" />
-                    <span>{new Date(project.startDate).toLocaleDateString()} - {new Date(project.endDate).toLocaleDateString()}</span>
+                    <span>
+                      {new Date(project.startDate).toLocaleDateString()} - {new Date(project.endDate).toLocaleDateString()}
+                    </span>
                   </div>
                 )}
+              </div>
 
+              {/* Location / Area of Interest */}
+              <div className="lg:w-1/5 min-w-0 space-y-1">
                 {project.areaOfInterest?.rings?.length > 0 && (
-                  <div className="flex items-center gap-1 text-xs text-red-600 font-medium mb-2">
-                    <MapPin className="w-3 h-3" />
-                    <span>Area of Interest: {project.areaOfInterest.name}</span>
+                  <div className="flex items-center gap-1 text-xs text-red-600 font-medium">
+                    <MapPin className="w-3 h-3 shrink-0" />
+                    <span className="truncate">Area: {project.areaOfInterest.name}</span>
                   </div>
                 )}
-
                 {project.location?.address && (
-                  <div className="flex items-center gap-1 text-xs text-gray-500 mb-3">
-                    <MapPin className="w-3 h-3 text-red-500" />
+                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                    <MapPin className="w-3 h-3 text-red-500 shrink-0" />
                     <span className="truncate">{project.location.address}</span>
                   </div>
                 )}
+              </div>
 
+              {/* Admins / Forms / Members */}
+              <div className="flex-1 min-w-0 space-y-2">
                 {isSuperAdmin && (
-                  <div className="mb-4">
-                    <p className="text-xs text-gray-500 mb-2">Assigned Admin(s):</p>
-                    <div className="flex flex-wrap gap-2">
-                      {project.assignedAdmins?.length > 0 ? (
-                        project.assignedAdmins.map(admin => (
-                          <span key={admin._id} className="px-2 py-1 bg-purple-50 text-purple-700 text-xs rounded-full">
-                            {admin.firstName} {admin.lastName}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-amber-600 text-sm">Not assigned to any Admin yet</span>
-                      )}
-                    </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs text-gray-500">Admin(s):</span>
+                    {project.assignedAdmins?.length > 0 ? (
+                      project.assignedAdmins.map((admin) => (
+                        <span key={admin._id} className="px-2 py-0.5 bg-purple-50 text-purple-700 text-xs rounded-full">
+                          {admin.firstName} {admin.lastName}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-amber-600 text-xs">Not assigned yet</span>
+                    )}
                   </div>
                 )}
 
                 {canManage && (
-                  <div className="mb-4">
-                    <p className="text-xs text-gray-500 mb-2">Forms ({project.enabledForms?.length || 0}):</p>
-                    <div className="flex flex-wrap gap-2">
-                      {project.enabledForms?.length > 0 ? (
-                        project.enabledForms.map(f => (
-                          <span key={f} className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-full">
-                            {f}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-gray-400 text-sm">No forms added yet</span>
-                      )}
-                    </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs text-gray-500">Forms ({project.enabledForms?.length || 0}):</span>
+                    {project.enabledForms?.length > 0 ? (
+                      project.enabledForms.map((f) => (
+                        <span key={f} className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full">{f}</span>
+                      ))
+                    ) : (
+                      <span className="text-gray-400 text-xs">No forms yet</span>
+                    )}
                   </div>
                 )}
 
-                {/* Leads & Team Members (Admin only) */}
                 {canAssignMembers && (
-                  <div className="mb-4">
-                    <p className="text-xs text-gray-500 mb-2">Leads & Team Members ({project.assignedUsers?.length || 0}):</p>
-                    <div className="flex flex-wrap gap-2">
-                      {project.assignedUsers?.length > 0 ? (
-                        project.assignedUsers.map(member => (
-                          <span key={member._id} className="px-2 py-1 bg-green-50 text-green-700 text-xs rounded-full">
-                            {member.firstName} {member.lastName}
-                            {member.role === 'lead' && <span className="ml-1 opacity-75">(Lead)</span>}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-gray-400 text-sm">No leads or team members assigned</span>
-                      )}
-                    </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs text-gray-500">Members ({project.assignedUsers?.length || 0}):</span>
+                    {project.assignedUsers?.length > 0 ? (
+                      project.assignedUsers.map((member) => (
+                        <span key={member._id} className="px-2 py-0.5 bg-green-50 text-green-700 text-xs rounded-full">
+                          {member.firstName} {member.lastName}
+                          {member.role === 'lead' && <span className="ml-1 opacity-75">(Lead)</span>}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-gray-400 text-xs">None assigned</span>
+                    )}
                   </div>
                 )}
+              </div>
 
-                <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                  <span className={`inline-flex items-center gap-1 text-xs font-medium ${project.isActive ? 'text-green-600' : 'text-red-600'}`}>
-                    {project.isActive ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
-                    {project.isActive ? 'Active' : 'Inactive'}
-                  </span>
-                  <span className="text-xs text-gray-400">ID: {project._id?.slice(-6)}</span>
-                </div>
+              {/* Status + actions */}
+              <div className="flex lg:flex-col items-center lg:items-end justify-between gap-2 shrink-0">
+                <span className={`inline-flex items-center gap-1 text-xs font-medium ${project.isActive ? 'text-green-600' : 'text-red-600'}`}>
+                  {project.isActive ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                  {project.isActive ? 'Active' : 'Inactive'}
+                </span>
+                {canManage && (
+                  <div className="flex gap-1">
+                    <button onClick={() => handleOpenModal(project)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg">
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => toggleStatus(project)}
+                      className={`p-1.5 rounded-lg ${project.isActive ? 'text-red-500 hover:bg-red-50' : 'text-green-500 hover:bg-green-50'}`}
+                    >
+                      <Power className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+                <span className="text-xs text-gray-400 hidden lg:block">ID: {project._id?.slice(-6)}</span>
               </div>
             </div>
           ))}
